@@ -429,6 +429,99 @@ private:
     HRESULT hr_;
 };
 
+class UniqueGdiObject {
+public:
+    UniqueGdiObject() = default;
+    explicit UniqueGdiObject(HGDIOBJ object) noexcept : object_(object) {}
+    ~UniqueGdiObject() { reset(); }
+
+    UniqueGdiObject(const UniqueGdiObject&) = delete;
+    UniqueGdiObject& operator=(const UniqueGdiObject&) = delete;
+
+    UniqueGdiObject(UniqueGdiObject&& other) noexcept : object_(other.release()) {}
+    UniqueGdiObject& operator=(UniqueGdiObject&& other) noexcept {
+        if (this != &other) {
+            reset();
+            object_ = other.release();
+        }
+        return *this;
+    }
+
+    void reset(HGDIOBJ object = nullptr) noexcept {
+        if (object_ != nullptr) {
+            ::DeleteObject(object_);
+        }
+        object_ = object;
+    }
+
+    [[nodiscard]] HGDIOBJ release() noexcept {
+        HGDIOBJ object = object_;
+        object_ = nullptr;
+        return object;
+    }
+
+    [[nodiscard]] HGDIOBJ get() const noexcept { return object_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return object_ != nullptr; }
+
+    template <typename T>
+    [[nodiscard]] T as() const noexcept {
+        return static_cast<T>(object_);
+    }
+
+private:
+    HGDIOBJ object_{nullptr};
+};
+
+class UniqueSubclass {
+public:
+    UniqueSubclass() = default;
+    UniqueSubclass(HWND hwnd, SUBCLASSPROC proc, UINT_PTR id, DWORD_PTR ref_data)
+        : hwnd_(hwnd), proc_(proc), id_(id) {
+        if (hwnd_ != nullptr && proc_ != nullptr) {
+            if (::SetWindowSubclass(hwnd_, proc_, id_, ref_data) == FALSE) {
+                hwnd_ = nullptr;
+                proc_ = nullptr;
+            }
+        }
+    }
+
+    ~UniqueSubclass() { reset(); }
+
+    UniqueSubclass(const UniqueSubclass&) = delete;
+    UniqueSubclass& operator=(const UniqueSubclass&) = delete;
+
+    UniqueSubclass(UniqueSubclass&& other) noexcept
+        : hwnd_(other.hwnd_), proc_(other.proc_), id_(other.id_) {
+        other.hwnd_ = nullptr;
+        other.proc_ = nullptr;
+    }
+
+    UniqueSubclass& operator=(UniqueSubclass&& other) noexcept {
+        if (this != &other) {
+            reset();
+            hwnd_ = other.hwnd_;
+            proc_ = other.proc_;
+            id_ = other.id_;
+            other.hwnd_ = nullptr;
+            other.proc_ = nullptr;
+        }
+        return *this;
+    }
+
+    void reset() noexcept {
+        if (hwnd_ != nullptr && proc_ != nullptr) {
+            ::RemoveWindowSubclass(hwnd_, proc_, id_);
+        }
+        hwnd_ = nullptr;
+        proc_ = nullptr;
+    }
+
+private:
+    HWND hwnd_{nullptr};
+    SUBCLASSPROC proc_{nullptr};
+    UINT_PTR id_{0};
+};
+
 class AppModuleGuard {
 public:
     AppModuleGuard(CAppModule& module, HINSTANCE instance)

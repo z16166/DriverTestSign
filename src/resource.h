@@ -14,3 +14,8 @@
 #define IDC_BROWSE_SYS      1006
 #define IDC_SIGN            1007
 #define IDC_STATUS          1008
+#define IDC_GROUP_KEY       1009
+#define IDC_GROUP_DRV       1010
+#define IDC_GROUP_LOG       1011
+#define IDC_LABEL_KEY       1012
+#define IDC_LABEL_SYS       1013

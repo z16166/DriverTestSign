@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.h"
+#include "MetalUi.h"
 #include "resource.h"
 
 class CMainDlg : public CDialogImpl<CMainDlg> {
@@ -23,6 +24,10 @@ public:
         MESSAGE_HANDLER(WM_INITDIALOG, OnInitDialog)
         MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
         MESSAGE_HANDLER(WM_CLOSE, OnWmClose)
+        MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
+        MESSAGE_HANDLER(WM_CTLCOLORSTATIC, OnCtlColorStatic)
+        MESSAGE_HANDLER(WM_CTLCOLOREDIT, OnCtlColorEdit)
+        MESSAGE_HANDLER(WM_DRAWITEM, OnDrawItem)
         MESSAGE_HANDLER(WM_APP_OPERATION_DONE, OnOperationDone)
         COMMAND_ID_HANDLER(IDC_BROWSE_KEY, OnBrowseKey)
         COMMAND_ID_HANDLER(IDC_GENERATE, OnGenerate)
@@ -35,6 +40,10 @@ public:
     LRESULT OnInitDialog(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnDestroy(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnWmClose(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnEraseBkgnd(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnCtlColorStatic(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnCtlColorEdit(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnDrawItem(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnOperationDone(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnBrowseKey(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnGenerate(WORD notify_code, WORD id, HWND control, BOOL& handled);
@@ -42,6 +51,8 @@ public:
     LRESULT OnBrowseSys(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSign(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnClose(WORD notify_code, WORD id, HWND control, BOOL& handled);
+
+    void TrackButtonHover(HWND button);
 
 private:
     [[nodiscard]] std::wstring GetText(int control_id) const;
@@ -53,7 +64,12 @@ private:
     void RunAsync(OperationKind kind, std::function<OperationResult()> work);
     bool ChooseFile(bool open_dialog, const wchar_t* default_ext, const wchar_t* default_name,
                     const wchar_t* filter, std::wstring& path);
+    void ApplyMetalChrome();
+    void DrawSectionCard(HDC hdc, int group_id, const wchar_t* title);
 
     std::jthread worker_;
     bool busy_{false};
+    testsign::MetalTheme theme_;
+    std::vector<testsign::UniqueSubclass> button_subclasses_;
+    HWND hovered_button_{nullptr};
 };

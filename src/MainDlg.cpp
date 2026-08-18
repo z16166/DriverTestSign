@@ -5,6 +5,8 @@
 #include "Signer.h"
 #include "WinUtil.h"
 
+#include <uxtheme.h>
+
 namespace {
 
 void PostOperationResult(HWND hwnd, std::unique_ptr<CMainDlg::OperationResult> result) {
@@ -14,12 +16,29 @@ void PostOperationResult(HWND hwnd, std::unique_ptr<CMainDlg::OperationResult> r
     }
 }
 
+LRESULT CALLBACK MetalButtonProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
+                                 UINT_PTR, DWORD_PTR ref_data) {
+    auto* dialog = reinterpret_cast<CMainDlg*>(ref_data);
+    if (dialog != nullptr) {
+        if (message == WM_MOUSEMOVE) {
+            dialog->TrackButtonHover(hwnd);
+        } else if (message == WM_MOUSELEAVE) {
+            dialog->TrackButtonHover(nullptr);
+        }
+    }
+    return ::DefSubclassProc(hwnd, message, wparam, lparam);
+}
+
+constexpr int kMetalButtons[] = {IDC_BROWSE_KEY, IDC_GENERATE, IDC_IMPORT,
+                                 IDC_BROWSE_SYS, IDC_SIGN,     IDCANCEL};
+
 }  // namespace
 
 LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
     CenterWindow();
     SetIcon(::LoadIconW(nullptr, IDI_SHIELD), TRUE);
     SetIcon(::LoadIconW(nullptr, IDI_SHIELD), FALSE);
+    ApplyMetalChrome();
     SetBusy(true);
 
     AppendStatus(L"正在读取上次使用的路径...");
@@ -35,7 +54,52 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT CMainDlg::OnDestroy(UINT, WPARAM, LPARAM, BOOL&) {
+    button_subclasses_.clear();
+    hovered_button_ = nullptr;
     return 0;
+}
+
+LRESULT CMainDlg::OnEraseBkgnd(UINT, WPARAM wparam, LPARAM, BOOL&) {
+    const HDC hdc = reinterpret_cast<HDC>(wparam);
+    RECT client{};
+    GetClientRect(&client);
+    testsign::DrawMetalBackground(hdc, client);
+    DrawSectionCard(hdc, IDC_GROUP_KEY, L"密钥");
+    DrawSectionCard(hdc, IDC_GROUP_DRV, L"驱动程序");
+    DrawSectionCard(hdc, IDC_GROUP_LOG, L"状态");
+    return TRUE;
+}
+
+LRESULT CMainDlg::OnCtlColorStatic(UINT, WPARAM wparam, LPARAM lparam, BOOL&) {
+    const HWND control = reinterpret_cast<HWND>(lparam);
+    wchar_t class_name[16]{};
+    ::GetClassNameW(control, class_name, 16);
+    if (::_wcsicmp(class_name, L"Edit") == 0) {
+        const HDC hdc = reinterpret_cast<HDC>(wparam);
+        ::SetTextColor(hdc, testsign::kMetalText);
+        ::SetBkColor(hdc, testsign::kMetalEdit);
+        return reinterpret_cast<LRESULT>(theme_.edit_brush());
+    }
+
+    const HDC hdc = reinterpret_cast<HDC>(wparam);
+    ::SetTextColor(hdc, testsign::kMetalMuted);
+    ::SetBkMode(hdc, TRANSPARENT);
+    return reinterpret_cast<LRESULT>(::GetStockObject(NULL_BRUSH));
+}
+
+LRESULT CMainDlg::OnCtlColorEdit(UINT, WPARAM wparam, LPARAM, BOOL&) {
+    const HDC hdc = reinterpret_cast<HDC>(wparam);
+    ::SetTextColor(hdc, testsign::kMetalText);
+    ::SetBkColor(hdc, testsign::kMetalEdit);
+    return reinterpret_cast<LRESULT>(theme_.edit_brush());
+}
+
+LRESULT CMainDlg::OnDrawItem(UINT, WPARAM, LPARAM lparam, BOOL&) {
+    const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
+    const int id = ::GetDlgCtrlID(item.hwndItem);
+    const bool primary = id == IDC_GENERATE || id == IDC_IMPORT || id == IDC_SIGN;
+    testsign::DrawMetalButton(item, theme_.ui_font(), primary, item.hwndItem == hovered_button_);
+    return TRUE;
 }
 
 LRESULT CMainDlg::OnWmClose(UINT, WPARAM, LPARAM, BOOL&) {
@@ -249,6 +313,81 @@ void CMainDlg::SetBusy(bool busy) {
     };
     for (const HWND control : controls) {
         ::EnableWindow(control, busy ? FALSE : TRUE);
+        ::InvalidateRect(control, nullptr, FALSE);
+    }
+}
+
+void CMainDlg::ApplyMetalChrome() {
+    theme_.Create();
+    testsign::ApplyDarkFrame(m_hWnd);
+
+    const int groups[] = {IDC_GROUP_KEY, IDC_GROUP_DRV, IDC_GROUP_LOG};
+    for (const int id : groups) {
+        ::ShowWindow(GetDlgItem(id), SW_HIDE);
+    }
+
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS};
+    for (const int id : labels) {
+        const HWND label = GetDlgItem(id);
+        ::SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
+        ::SetWindowLongPtrW(label, GWL_EXSTYLE,
+                            ::GetWindowLongPtrW(label, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+    }
+
+    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_STATUS};
+    for (const int id : edits) {
+        const HWND edit = GetDlgItem(id);
+        ::SendMessageW(edit, WM_SETFONT,
+                       reinterpret_cast<WPARAM>(id == IDC_STATUS ? theme_.log_font() : theme_.ui_font()),
+                       TRUE);
+        ::SetWindowLongPtrW(edit, GWL_EXSTYLE,
+                            ::GetWindowLongPtrW(edit, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
+        ::SetWindowPos(edit, nullptr, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        ::SetWindowTheme(edit, L"DarkMode_Explorer", nullptr);
+    }
+
+    button_subclasses_.clear();
+    UINT_PTR subclass_id = 1;
+    for (const int id : kMetalButtons) {
+        const HWND button = GetDlgItem(id);
+        ::SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
+        button_subclasses_.emplace_back(button, MetalButtonProc, subclass_id, reinterpret_cast<DWORD_PTR>(this));
+        ++subclass_id;
+    }
+}
+
+void CMainDlg::DrawSectionCard(HDC hdc, int group_id, const wchar_t* title) {
+    RECT rc{};
+    ::GetWindowRect(GetDlgItem(group_id), &rc);
+    ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&rc), 2);
+    testsign::DrawMetalCard(hdc, rc, title, theme_.title_font());
+}
+
+void CMainDlg::TrackButtonHover(HWND button) {
+    if (hovered_button_ == button) {
+        if (button != nullptr) {
+            TRACKMOUSEEVENT track{};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE;
+            track.hwndTrack = button;
+            ::TrackMouseEvent(&track);
+        }
+        return;
+    }
+
+    const HWND previous = hovered_button_;
+    hovered_button_ = button;
+    if (previous != nullptr) {
+        ::InvalidateRect(previous, nullptr, FALSE);
+    }
+    if (hovered_button_ != nullptr) {
+        ::InvalidateRect(hovered_button_, nullptr, FALSE);
+        TRACKMOUSEEVENT track{};
+        track.cbSize = sizeof(track);
+        track.dwFlags = TME_LEAVE;
+        track.hwndTrack = hovered_button_;
+        ::TrackMouseEvent(&track);
     }
 }
 
