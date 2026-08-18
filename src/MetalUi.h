@@ -30,27 +30,32 @@ struct MetalPalette {
     bool dark{true};
 };
 
+[[nodiscard]] UINT QueryWindowDpi(HWND hwnd);
+[[nodiscard]] int ScalePx(int px96, UINT dpi);
 [[nodiscard]] bool QueryAppsUseLightTheme();
 [[nodiscard]] bool ResolveUsesLight(ThemeMode mode);
 [[nodiscard]] MetalPalette MakeMetalPalette(bool light);
 
 void FillVerticalGradient(HDC hdc, const RECT& rc, COLORREF top, COLORREF bottom);
-void DrawMetalBackground(HDC hdc, const RECT& rc, const MetalPalette& palette);
+void DrawMetalBackground(HDC hdc, const RECT& rc, const MetalPalette& palette, UINT dpi);
 void DrawMetalCard(HDC hdc, const RECT& rc, const wchar_t* title, HFONT title_font,
-                   const MetalPalette& palette);
+                   const MetalPalette& palette, UINT dpi);
 void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool hovered,
-                     const MetalPalette& palette);
-void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalette& palette);
+                     const MetalPalette& palette, UINT dpi);
+void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalette& palette,
+                        UINT dpi);
 void ApplyWindowFrame(HWND hwnd, const MetalPalette& palette);
 
 class MetalTheme {
 public:
-    void Create(ThemeMode preference);
+    void Create(ThemeMode preference, UINT dpi);
+    void RecreateFonts(UINT dpi);
     bool SetPreference(ThemeMode preference);
     bool Refresh();
 
     [[nodiscard]] ThemeMode preference() const noexcept { return preference_; }
     [[nodiscard]] const MetalPalette& palette() const noexcept { return palette_; }
+    [[nodiscard]] UINT dpi() const noexcept { return dpi_; }
     [[nodiscard]] HFONT ui_font() const noexcept { return font_ui_.as<HFONT>(); }
     [[nodiscard]] HFONT title_font() const noexcept { return font_title_.as<HFONT>(); }
     [[nodiscard]] HFONT log_font() const noexcept { return font_log_.as<HFONT>(); }
@@ -62,6 +67,7 @@ private:
     void RecreateBrushes();
 
     ThemeMode preference_{ThemeMode::System};
+    UINT dpi_{96};
     MetalPalette palette_{};
     UniqueGdiObject font_ui_;
     UniqueGdiObject font_title_;

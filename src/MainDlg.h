@@ -24,6 +24,7 @@ public:
         MESSAGE_HANDLER(WM_INITDIALOG, OnInitDialog)
         MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
         MESSAGE_HANDLER(WM_CLOSE, OnWmClose)
+        MESSAGE_HANDLER(WM_DPICHANGED, OnDpiChanged)
         MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
         MESSAGE_HANDLER(WM_SETTINGCHANGE, OnSettingChange)
         MESSAGE_HANDLER(WM_THEMECHANGED, OnThemeChanged)
@@ -45,6 +46,7 @@ public:
     LRESULT OnInitDialog(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnDestroy(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnWmClose(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnDpiChanged(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnEraseBkgnd(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnSettingChange(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnThemeChanged(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
@@ -75,15 +77,27 @@ private:
     bool ChooseFile(bool open_dialog, const wchar_t* default_ext, const wchar_t* default_name,
                     const wchar_t* filter, std::wstring& path);
     void ApplyMetalChrome();
+    void ApplyControlFonts();
     void ApplyOsChrome();
     void SyncOsTheme();
     void InitThemeCombo();
+    void ApplyThemeComboMetrics();
+    void CaptureLayout();
+    void ApplyScaledLayout(UINT new_dpi);
     [[nodiscard]] testsign::ThemeMode SelectedThemeMode() const;
     void DrawSectionCard(HDC hdc, int group_id, const wchar_t* title);
+
+    struct ControlPlacement {
+        HWND hwnd{nullptr};
+        RECT rc{};
+    };
 
     std::jthread worker_;
     bool busy_{false};
     bool theme_combo_ready_{false};
+    UINT dpi_{0};
+    UINT layout_dpi_{0};
+    std::vector<ControlPlacement> layout_;
     testsign::MetalTheme theme_;
     std::vector<testsign::UniqueSubclass> button_subclasses_;
     HWND hovered_button_{nullptr};

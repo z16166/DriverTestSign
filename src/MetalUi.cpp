@@ -34,11 +34,9 @@ private:
     HGDIOBJ previous_;
 };
 
-HFONT MakeFont(const wchar_t* family, int point_size, int weight) {
+HFONT MakeFont(const wchar_t* family, int point_size, int weight, UINT dpi) {
     LOGFONTW log_font{};
-    const HDC screen = ::GetDC(nullptr);
-    log_font.lfHeight = -::MulDiv(point_size, ::GetDeviceCaps(screen, LOGPIXELSY), 72);
-    ::ReleaseDC(nullptr, screen);
+    log_font.lfHeight = -::MulDiv(point_size, static_cast<int>(dpi == 0 ? 96 : dpi), 72);
     log_font.lfWeight = weight;
     log_font.lfQuality = CLEARTYPE_QUALITY;
     log_font.lfCharSet = DEFAULT_CHARSET;
@@ -47,6 +45,21 @@ HFONT MakeFont(const wchar_t* family, int point_size, int weight) {
 }
 
 }  // namespace
+
+UINT QueryWindowDpi(HWND hwnd) {
+    if (hwnd != nullptr) {
+        const UINT dpi = ::GetDpiForWindow(hwnd);
+        if (dpi != 0) {
+            return dpi;
+        }
+    }
+    const UINT system_dpi = ::GetDpiForSystem();
+    return system_dpi != 0 ? system_dpi : 96;
+}
+
+int ScalePx(int px96, UINT dpi) {
+    return ::MulDiv(px96, static_cast<int>(dpi == 0 ? 96 : dpi), 96);
+}
 
 bool QueryAppsUseLightTheme() {
     DWORD value = 1;
@@ -134,39 +147,43 @@ void FillVerticalGradient(HDC hdc, const RECT& rc, COLORREF top, COLORREF bottom
     ::GradientFill(hdc, vertices, 2, &band, 1, GRADIENT_FILL_RECT_V);
 }
 
-void DrawMetalBackground(HDC hdc, const RECT& rc, const MetalPalette& palette) {
+void DrawMetalBackground(HDC hdc, const RECT& rc, const MetalPalette& palette, UINT dpi) {
     FillVerticalGradient(hdc, rc, palette.bg_top, palette.bg_bottom);
 
     UniqueGdiObject brush(::CreateSolidBrush(palette.grain));
-    for (LONG y = rc.top; y < rc.bottom; y += 3) {
+    const int step = (std::max)(2, ScalePx(3, dpi));
+    for (LONG y = rc.top; y < rc.bottom; y += step) {
         RECT line{rc.left, y, rc.right, y + 1};
         ::FillRect(hdc, &line, brush.as<HBRUSH>());
     }
 }
 
 void DrawMetalCard(HDC hdc, const RECT& rc, const wchar_t* title, HFONT title_font,
-                   const MetalPalette& palette) {
+                   const MetalPalette& palette, UINT dpi) {
+    const int radius = ScalePx(14, dpi);
+    const int inset = (std::max)(1, ScalePx(1, dpi));
+    const int highlight = ScalePx(8, dpi);
     UniqueGdiObject brush(::CreateSolidBrush(palette.panel_bottom));
     UniqueGdiObject pen(::CreatePen(PS_SOLID, 1, palette.line_hi));
     const DcSelector select_brush(hdc, brush.get());
     const DcSelector select_pen(hdc, pen.get());
-    ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 14, 14);
+    ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
 
     RECT inner = rc;
-    ::InflateRect(&inner, -1, -1);
+    ::InflateRect(&inner, -inset, -inset);
     FillVerticalGradient(hdc, inner, palette.panel_top, palette.panel_bottom);
 
     UniqueGdiObject hi(::CreatePen(PS_SOLID, 1, palette.line_hi));
     UniqueGdiObject lo(::CreatePen(PS_SOLID, 1, palette.line_lo));
     {
         const DcSelector select_hi(hdc, hi.get());
-        ::MoveToEx(hdc, inner.left + 8, inner.top, nullptr);
-        ::LineTo(hdc, inner.right - 8, inner.top);
+        ::MoveToEx(hdc, inner.left + highlight, inner.top, nullptr);
+        ::LineTo(hdc, inner.right - highlight, inner.top);
     }
     {
         const DcSelector select_lo(hdc, lo.get());
-        ::MoveToEx(hdc, inner.left + 8, inner.bottom - 1, nullptr);
-        ::LineTo(hdc, inner.right - 8, inner.bottom - 1);
+        ::MoveToEx(hdc, inner.left + highlight, inner.bottom - inset, nullptr);
+        ::LineTo(hdc, inner.right - highlight, inner.bottom - inset);
     }
 
     if (title == nullptr || title_font == nullptr) {
@@ -176,25 +193,31 @@ void DrawMetalCard(HDC hdc, const RECT& rc, const wchar_t* title, HFONT title_fo
     const DcSelector select_font(hdc, title_font);
     TEXTMETRICW metrics{};
     ::GetTextMetricsW(hdc, &metrics);
-    const LONG title_top = rc.top + 8;
-    const LONG title_bottom = title_top + metrics.tmHeight + 8;
-    const LONG bar_left = rc.left + 16;
-    RECT accent{bar_left, title_top + 3, bar_left + 3, title_bottom - 3};
+    const LONG title_pad = ScalePx(8, dpi);
+    const LONG title_top = rc.top + title_pad;
+    const LONG title_bottom = title_top + metrics.tmHeight + title_pad;
+    const LONG bar_left = rc.left + ScalePx(16, dpi);
+    const LONG accent_width = (std::max)(2, ScalePx(3, dpi));
+    RECT accent{bar_left, title_top + ScalePx(3, dpi), bar_left + accent_width,
+                title_bottom - ScalePx(3, dpi)};
     UniqueGdiObject gold(::CreateSolidBrush(palette.gold));
     ::FillRect(hdc, &accent, gold.as<HBRUSH>());
 
     ::SetBkMode(hdc, TRANSPARENT);
     ::SetTextColor(hdc, palette.gold);
-    RECT text_rc{accent.right + 10, title_top, rc.right - 14, title_bottom};
+    RECT text_rc{accent.right + ScalePx(10, dpi), title_top, rc.right - ScalePx(14, dpi),
+                 title_bottom};
     ::DrawTextW(hdc, title, -1, &text_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 }
 
 void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool hovered,
-                     const MetalPalette& palette) {
+                     const MetalPalette& palette, UINT dpi) {
     const bool disabled = (item.itemState & ODS_DISABLED) != 0;
     const bool pressed = (item.itemState & ODS_SELECTED) != 0;
     RECT rc = item.rcItem;
     const HDC hdc = item.hDC;
+    const int radius = ScalePx(10, dpi);
+    const int inset = (std::max)(1, ScalePx(1, dpi));
 
     COLORREF top = palette.btn_top;
     COLORREF bottom = palette.btn_bottom;
@@ -216,12 +239,12 @@ void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool 
     UniqueGdiObject clip(::CreateRectRgn(0, 0, 0, 0));
     const int had_clip = ::GetClipRgn(hdc, clip.as<HRGN>());
     ::BeginPath(hdc);
-    ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 10, 10);
+    ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
     ::EndPath(hdc);
     ::SelectClipPath(hdc, RGN_COPY);
 
     RECT inner = rc;
-    ::InflateRect(&inner, -1, -1);
+    ::InflateRect(&inner, -inset, -inset);
     FillVerticalGradient(hdc, inner, top, bottom);
 
     if (had_clip == 1) {
@@ -234,7 +257,7 @@ void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool 
     {
         const DcSelector select_brush(hdc, ::GetStockObject(NULL_BRUSH));
         const DcSelector select_pen(hdc, pen.get());
-        ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 10, 10);
+        ::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
     }
 
     wchar_t text[128]{};
@@ -245,7 +268,8 @@ void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool 
     ::DrawTextW(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 }
 
-void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalette& palette) {
+void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalette& palette,
+                        UINT dpi) {
     const bool selected = (item.itemState & ODS_SELECTED) != 0;
     const COLORREF background = selected ? palette.panel_top : palette.edit;
     UniqueGdiObject brush(::CreateSolidBrush(background));
@@ -260,9 +284,10 @@ void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalet
     const DcSelector select_font(item.hDC, font);
     ::SetBkMode(item.hDC, TRANSPARENT);
     ::SetTextColor(item.hDC, selected ? palette.gold : palette.text);
+    const int pad = ScalePx(8, dpi);
     RECT text_rc = item.rcItem;
-    text_rc.left += 8;
-    text_rc.right -= 8;
+    text_rc.left += pad;
+    text_rc.right -= pad;
     ::DrawTextW(item.hDC, text, -1, &text_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 }
 
@@ -299,14 +324,19 @@ bool MetalTheme::ApplyResolvedPalette(bool force) {
     return true;
 }
 
-void MetalTheme::Create(ThemeMode preference) {
-    font_ui_.reset(MakeFont(L"Segoe UI", 9, FW_NORMAL));
-    font_title_.reset(MakeFont(L"Segoe UI Semibold", 10, FW_SEMIBOLD));
-    font_log_.reset(MakeFont(L"Cascadia Mono", 9, FW_NORMAL));
+void MetalTheme::RecreateFonts(UINT dpi) {
+    dpi_ = dpi == 0 ? 96 : dpi;
+    font_ui_.reset(MakeFont(L"Segoe UI", 9, FW_NORMAL, dpi_));
+    font_title_.reset(MakeFont(L"Segoe UI Semibold", 10, FW_SEMIBOLD, dpi_));
+    font_log_.reset(MakeFont(L"Cascadia Mono", 9, FW_NORMAL, dpi_));
     if (!font_log_) {
-        font_log_.reset(MakeFont(L"Consolas", 9, FW_NORMAL));
+        font_log_.reset(MakeFont(L"Consolas", 9, FW_NORMAL, dpi_));
     }
+}
+
+void MetalTheme::Create(ThemeMode preference, UINT dpi) {
     preference_ = preference;
+    RecreateFonts(dpi);
     ApplyResolvedPalette(true);
 }
 
