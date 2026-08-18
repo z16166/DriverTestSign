@@ -21,3 +21,5 @@
 #define IDC_LABEL_SYS       1013
 #define IDC_LABEL_THEME     1014
 #define IDC_THEME           1015
+#define IDC_LABEL_LANG      1016
+#define IDC_LANGUAGE        1017

@@ -3,6 +3,7 @@
 #include "Certificate.h"
 #include "Settings.h"
 #include "Signer.h"
+#include "Strings.h"
 #include "WinUtil.h"
 
 #include <uxtheme.h>
@@ -34,13 +35,23 @@ constexpr int kMetalButtons[] = {IDC_BROWSE_KEY, IDC_GENERATE, IDC_IMPORT,
 
 struct ThemeOption {
     testsign::ThemeMode mode;
-    const wchar_t* label;
+    testsign::Str label;
 };
 
 constexpr ThemeOption kThemeOptions[] = {
-    {testsign::ThemeMode::Dark, L"深色"},
-    {testsign::ThemeMode::Light, L"浅色"},
-    {testsign::ThemeMode::System, L"跟随系统"},
+    {testsign::ThemeMode::Dark, testsign::Str::ThemeDark},
+    {testsign::ThemeMode::Light, testsign::Str::ThemeLight},
+    {testsign::ThemeMode::System, testsign::Str::ThemeSystem},
+};
+
+struct LanguageOption {
+    testsign::UiLanguage language;
+    const wchar_t* label;
+};
+
+constexpr LanguageOption kLanguageOptions[] = {
+    {testsign::UiLanguage::English, L"English"},
+    {testsign::UiLanguage::ChineseSimplified, L"简体中文"},
 };
 
 [[nodiscard]] int ThemeComboItemHeight(HWND dialog, HFONT font, UINT dpi) {
@@ -69,13 +80,14 @@ constexpr ThemeOption kThemeOptions[] = {
 }  // namespace
 
 LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
+    testsign::SetUiLanguage(testsign::Settings::LoadLanguage());
     CenterWindow();
     SetIcon(::LoadIconW(nullptr, IDI_SHIELD), TRUE);
     SetIcon(::LoadIconW(nullptr, IDI_SHIELD), FALSE);
     ApplyMetalChrome();
     SetBusy(true);
 
-    AppendStatus(L"正在读取上次使用的路径...");
+    AppendStatus(testsign::Tr(testsign::Str::StatusLoading));
     RunAsync(OperationKind::LoadSettings, []() {
         const testsign::Settings::Paths paths = testsign::Settings::LoadAll();
         OperationResult result;
@@ -115,7 +127,7 @@ LRESULT CMainDlg::OnDpiChanged(UINT, WPARAM wparam, LPARAM lparam, BOOL&) {
     if (theme_.ui_font() != nullptr) {
         theme_.RecreateFonts(new_dpi);
         ApplyControlFonts();
-        ApplyThemeComboMetrics();
+        ApplyAllComboMetrics();
         CaptureLayout();
         ApplyOsChrome();
     }
@@ -127,9 +139,9 @@ LRESULT CMainDlg::OnEraseBkgnd(UINT, WPARAM wparam, LPARAM, BOOL&) {
     RECT client{};
     GetClientRect(&client);
     testsign::DrawMetalBackground(hdc, client, theme_.palette(), theme_.dpi());
-    DrawSectionCard(hdc, IDC_GROUP_KEY, L"密钥");
-    DrawSectionCard(hdc, IDC_GROUP_DRV, L"驱动程序");
-    DrawSectionCard(hdc, IDC_GROUP_LOG, L"状态");
+    DrawSectionCard(hdc, IDC_GROUP_KEY, testsign::Tr(testsign::Str::CardKey));
+    DrawSectionCard(hdc, IDC_GROUP_DRV, testsign::Tr(testsign::Str::CardDriver));
+    DrawSectionCard(hdc, IDC_GROUP_LOG, testsign::Tr(testsign::Str::CardStatus));
     return TRUE;
 }
 
@@ -145,7 +157,7 @@ LRESULT CMainDlg::OnThemeChanged(UINT, WPARAM, LPARAM, BOOL&) {
 
 LRESULT CMainDlg::OnMeasureItem(UINT, WPARAM, LPARAM lparam, BOOL& handled) {
     auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
-    if (measure == nullptr || measure->CtlID != IDC_THEME) {
+    if (measure == nullptr || (measure->CtlID != IDC_THEME && measure->CtlID != IDC_LANGUAGE)) {
         handled = FALSE;
         return 0;
     }
@@ -211,6 +223,22 @@ LRESULT CMainDlg::OnThemeSelChange(WORD, WORD, HWND, BOOL&) {
     return 0;
 }
 
+LRESULT CMainDlg::OnLanguageSelChange(WORD, WORD, HWND, BOOL&) {
+    if (!language_combo_ready_) {
+        return 0;
+    }
+
+    const testsign::UiLanguage language = SelectedLanguage();
+    testsign::SetUiLanguage(language);
+    testsign::Settings::SaveLanguage(language);
+    ApplyUiText();
+    InitThemeCombo();
+    ApplyAllComboMetrics();
+    CaptureLayout();
+    ApplyOsChrome();
+    return 0;
+}
+
 LRESULT CMainDlg::OnWmClose(UINT, WPARAM, LPARAM, BOOL&) {
     RequestClose();
     return 0;
@@ -232,7 +260,7 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
     }
 
     if (!result->success) {
-        AppendStatus(std::wstring(L"失败：") + result->message);
+        AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusFailedPrefix)) + result->message);
         return 0;
     }
 
@@ -240,9 +268,9 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
     case OperationKind::LoadSettings:
         SetText(IDC_KEY_PATH, result->key_path);
         SetText(IDC_SYS_PATH, result->sys_path);
-        AppendStatus(L"就绪。证书主题：CN=TestSign Kernel Test CA");
-        AppendStatus(L"时间戳服务器：http://timestamp.digicert.com （失败时回退 Sectigo）");
-        AppendStatus(L"导入本机根证书与签名驱动需要管理员权限。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusReady1));
+        AppendStatus(testsign::Tr(testsign::Str::StatusReady2));
+        AppendStatus(testsign::Tr(testsign::Str::StatusReady3));
         break;
     case OperationKind::Persist:
         if (result->close_after) {
@@ -251,15 +279,14 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
         break;
     case OperationKind::Generate:
         SetText(IDC_KEY_PATH, result->key_path);
-        AppendStatus(std::wstring(L"已生成空密码的 RSA-2048 / SHA256 测试证书（CN=TestSign Kernel Test CA）：") +
-                     result->key_path);
+        AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusGenerated)) + result->key_path);
         break;
     case OperationKind::Import:
-        AppendStatus(L"已将公钥导入本机“受信任的根证书颁发机构”和“受信任的发布者”。验证测试签名仍需开启 testsigning。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusImported));
         break;
     case OperationKind::Sign:
-        AppendStatus(std::wstring(L"已使用 SHA256 签名：") + result->sys_path);
-        AppendStatus(L"加载该驱动前请确认本机已开启测试签名（bcdedit /set testsigning on）。");
+        AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSigned)) + result->sys_path);
+        AppendStatus(testsign::Tr(testsign::Str::StatusSignHint));
         break;
     }
     return 0;
@@ -272,14 +299,13 @@ LRESULT CMainDlg::OnBrowseKey(WORD, WORD, HWND, BOOL&) {
 
     SetBusy(true);
     std::wstring path;
-    if (!ChooseFile(true, L"pfx", nullptr,
-                    L"PFX 密钥文件 (*.pfx)\0*.pfx\0所有文件 (*.*)\0*.*\0", path)) {
+    if (!ChooseFile(true, L"pfx", nullptr, testsign::Tr(testsign::Str::FilterPfx), path)) {
         SetBusy(false);
         return 0;
     }
 
     SetText(IDC_KEY_PATH, path);
-    AppendStatus(std::wstring(L"已选择密钥：") + path);
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSelectedKey)) + path);
     PersistAsync(false);
     return 0;
 }
@@ -291,13 +317,13 @@ LRESULT CMainDlg::OnGenerate(WORD, WORD, HWND, BOOL&) {
 
     SetBusy(true);
     std::wstring path;
-    if (!ChooseFile(false, L"pfx", L"TestSignKernelTest.pfx",
-                    L"PFX 密钥文件 (*.pfx)\0*.pfx\0所有文件 (*.*)\0*.*\0", path)) {
+    if (!ChooseFile(false, L"pfx", L"TestSignKernelTest.pfx", testsign::Tr(testsign::Str::FilterPfx),
+                    path)) {
         SetBusy(false);
         return 0;
     }
 
-    AppendStatus(std::wstring(L"正在生成密钥：") + path);
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusGenerating)) + path);
     RunAsync(OperationKind::Generate, [path]() {
         testsign::GenerateKeyPair(path);
         testsign::Settings::Save(testsign::Settings::kKeyPathName, path);
@@ -316,13 +342,13 @@ LRESULT CMainDlg::OnImport(WORD, WORD, HWND, BOOL&) {
 
     const std::wstring pfx = GetText(IDC_KEY_PATH);
     if (pfx.empty()) {
-        AppendStatus(L"请先选择 PFX 密钥 的完整路径。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusNeedPfx));
         return 0;
     }
 
-    AppendStatus(L"正在导入公钥到本机证书存储...");
+    AppendStatus(testsign::Tr(testsign::Str::StatusImporting));
     RunAsync(OperationKind::Import, [pfx]() {
-        testsign::EnsureExistingFile(pfx, L"PFX 密钥");
+        testsign::EnsureExistingFile(pfx, testsign::Tr(testsign::Str::WhatPfx));
         testsign::ImportPublicKeyToLocalMachineRoot(pfx);
         OperationResult result;
         result.success = true;
@@ -339,14 +365,13 @@ LRESULT CMainDlg::OnBrowseSys(WORD, WORD, HWND, BOOL&) {
 
     SetBusy(true);
     std::wstring path;
-    if (!ChooseFile(true, L"sys", nullptr, L"驱动程序 (*.sys)\0*.sys\0所有文件 (*.*)\0*.*\0",
-                    path)) {
+    if (!ChooseFile(true, L"sys", nullptr, testsign::Tr(testsign::Str::FilterSys), path)) {
         SetBusy(false);
         return 0;
     }
 
     SetText(IDC_SYS_PATH, path);
-    AppendStatus(std::wstring(L"已选择驱动：") + path);
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSelectedSys)) + path);
     PersistAsync(false);
     return 0;
 }
@@ -359,14 +384,14 @@ LRESULT CMainDlg::OnSign(WORD, WORD, HWND, BOOL&) {
     const std::wstring pfx = GetText(IDC_KEY_PATH);
     const std::wstring sys = GetText(IDC_SYS_PATH);
     if (pfx.empty() || sys.empty()) {
-        AppendStatus(L"请先选择 PFX 密钥和 SYS 文件的完整路径。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusNeedPfxAndSys));
         return 0;
     }
 
-    AppendStatus(std::wstring(L"正在签名：") + sys);
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSigning)) + sys);
     RunAsync(OperationKind::Sign, [pfx, sys]() {
-        testsign::EnsureExistingFile(pfx, L"PFX 密钥");
-        testsign::EnsureExistingFile(sys, L"SYS 文件");
+        testsign::EnsureExistingFile(pfx, testsign::Tr(testsign::Str::WhatPfx));
+        testsign::EnsureExistingFile(sys, testsign::Tr(testsign::Str::WhatSys));
         testsign::SignDriver(pfx, sys);
         testsign::Settings::SaveAll({pfx, sys});
         OperationResult result;
@@ -438,6 +463,7 @@ void CMainDlg::ApplyOsChrome() {
 
     const wchar_t* combo_theme = theme_.palette().dark ? L"DarkMode_CFD" : L"CFD";
     ::SetWindowTheme(GetDlgItem(IDC_THEME), combo_theme, nullptr);
+    ::SetWindowTheme(GetDlgItem(IDC_LANGUAGE), combo_theme, nullptr);
 
     ::RedrawWindow(m_hWnd, nullptr, nullptr,
                    RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
@@ -452,9 +478,9 @@ void CMainDlg::SyncOsTheme() {
     }
 }
 
-void CMainDlg::ApplyThemeComboMetrics() {
-    const HWND combo = GetDlgItem(IDC_THEME);
-    const HWND label = GetDlgItem(IDC_LABEL_THEME);
+void CMainDlg::ApplyComboMetrics(int combo_id, int label_id, int item_count) {
+    const HWND combo = GetDlgItem(combo_id);
+    const HWND label = GetDlgItem(label_id);
     const int item_height = ThemeComboItemHeight(m_hWnd, theme_.ui_font(), theme_.dpi());
     const int extra = testsign::ScalePx(6, theme_.dpi());
     RECT combo_rc{};
@@ -469,8 +495,7 @@ void CMainDlg::ApplyThemeComboMetrics() {
     COMBOBOXINFO info{};
     info.cbSize = sizeof(info);
     if (::GetComboBoxInfo(combo, &info) && info.hwndList != nullptr) {
-        const int list_height =
-            item_height * static_cast<int>(std::size(kThemeOptions)) + extra;
+        const int list_height = item_height * item_count + extra;
         ::SetWindowPos(info.hwndList, nullptr, 0, 0, combo_rc.right - combo_rc.left, list_height,
                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
@@ -482,6 +507,25 @@ void CMainDlg::ApplyThemeComboMetrics() {
     ::SetWindowPos(label, nullptr, label_rc.left,
                    combo_rc.top + (item_height + extra - label_height) / 2, 0, 0,
                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void CMainDlg::ApplyAllComboMetrics() {
+    ApplyComboMetrics(IDC_THEME, IDC_LABEL_THEME, static_cast<int>(std::size(kThemeOptions)));
+    ApplyComboMetrics(IDC_LANGUAGE, IDC_LABEL_LANG, static_cast<int>(std::size(kLanguageOptions)));
+}
+
+void CMainDlg::ApplyUiText() {
+    SetWindowText(testsign::Tr(testsign::Str::WindowTitle));
+    SetDlgItemTextW(IDC_LABEL_KEY, testsign::Tr(testsign::Str::LabelPfx));
+    SetDlgItemTextW(IDC_LABEL_SYS, testsign::Tr(testsign::Str::LabelSys));
+    SetDlgItemTextW(IDC_LABEL_THEME, testsign::Tr(testsign::Str::LabelTheme));
+    SetDlgItemTextW(IDC_LABEL_LANG, testsign::Tr(testsign::Str::LabelLanguage));
+    SetDlgItemTextW(IDC_BROWSE_KEY, testsign::Tr(testsign::Str::Browse));
+    SetDlgItemTextW(IDC_GENERATE, testsign::Tr(testsign::Str::Generate));
+    SetDlgItemTextW(IDC_IMPORT, testsign::Tr(testsign::Str::Import));
+    SetDlgItemTextW(IDC_BROWSE_SYS, testsign::Tr(testsign::Str::Browse));
+    SetDlgItemTextW(IDC_SIGN, testsign::Tr(testsign::Str::Sign));
+    SetDlgItemTextW(IDCANCEL, testsign::Tr(testsign::Str::Close));
 }
 
 void CMainDlg::CaptureLayout() {
@@ -522,13 +566,12 @@ void CMainDlg::InitThemeCombo() {
     const HWND combo = GetDlgItem(IDC_THEME);
     ::SendMessageW(combo, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
     ::SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-    ApplyThemeComboMetrics();
 
     const testsign::ThemeMode selected = theme_.preference();
     int selected_index = 2;
     for (const ThemeOption& option : kThemeOptions) {
-        const int index = static_cast<int>(::SendMessageW(combo, CB_ADDSTRING, 0,
-                                                          reinterpret_cast<LPARAM>(option.label)));
+        const int index = static_cast<int>(::SendMessageW(
+            combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(testsign::Tr(option.label))));
         ::SendMessageW(combo, CB_SETITEMDATA, static_cast<WPARAM>(index),
                        static_cast<LPARAM>(option.mode));
         if (option.mode == selected) {
@@ -537,6 +580,27 @@ void CMainDlg::InitThemeCombo() {
     }
     ::SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
     theme_combo_ready_ = true;
+}
+
+void CMainDlg::InitLanguageCombo() {
+    language_combo_ready_ = false;
+    const HWND combo = GetDlgItem(IDC_LANGUAGE);
+    ::SendMessageW(combo, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
+    ::SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+
+    const testsign::UiLanguage selected = testsign::CurrentUiLanguage();
+    int selected_index = 0;
+    for (const LanguageOption& option : kLanguageOptions) {
+        const int index = static_cast<int>(::SendMessageW(combo, CB_ADDSTRING, 0,
+                                                          reinterpret_cast<LPARAM>(option.label)));
+        ::SendMessageW(combo, CB_SETITEMDATA, static_cast<WPARAM>(index),
+                       static_cast<LPARAM>(option.language));
+        if (option.language == selected) {
+            selected_index = index;
+        }
+    }
+    ::SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
+    language_combo_ready_ = true;
 }
 
 testsign::ThemeMode CMainDlg::SelectedThemeMode() const {
@@ -549,10 +613,20 @@ testsign::ThemeMode CMainDlg::SelectedThemeMode() const {
         ::SendMessageW(combo, CB_GETITEMDATA, static_cast<WPARAM>(index), 0));
 }
 
+testsign::UiLanguage CMainDlg::SelectedLanguage() const {
+    const HWND combo = GetDlgItem(IDC_LANGUAGE);
+    const int index = static_cast<int>(::SendMessageW(combo, CB_GETCURSEL, 0, 0));
+    if (index < 0) {
+        return testsign::UiLanguage::English;
+    }
+    return static_cast<testsign::UiLanguage>(
+        ::SendMessageW(combo, CB_GETITEMDATA, static_cast<WPARAM>(index), 0));
+}
+
 void CMainDlg::ApplyControlFonts() {
     SetFont(theme_.ui_font());
 
-    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME};
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME, IDC_LABEL_LANG};
     for (const int id : labels) {
         ::SendMessageW(GetDlgItem(id), WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
     }
@@ -569,6 +643,8 @@ void CMainDlg::ApplyControlFonts() {
     }
     ::SendMessageW(GetDlgItem(IDC_THEME), WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()),
                    TRUE);
+    ::SendMessageW(GetDlgItem(IDC_LANGUAGE), WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()),
+                   TRUE);
 }
 
 void CMainDlg::ApplyMetalChrome() {
@@ -580,7 +656,7 @@ void CMainDlg::ApplyMetalChrome() {
         ::ShowWindow(GetDlgItem(id), SW_HIDE);
     }
 
-    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME};
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME, IDC_LABEL_LANG};
     for (const int id : labels) {
         const HWND label = GetDlgItem(id);
         ::SetWindowLongPtrW(label, GWL_EXSTYLE,
@@ -607,6 +683,9 @@ void CMainDlg::ApplyMetalChrome() {
     }
 
     InitThemeCombo();
+    InitLanguageCombo();
+    ApplyUiText();
+    ApplyAllComboMetrics();
     CaptureLayout();
     ApplyOsChrome();
 }
@@ -647,7 +726,7 @@ void CMainDlg::TrackButtonHover(HWND button) {
 
 void CMainDlg::RequestClose() {
     if (busy_) {
-        AppendStatus(L"请等待当前操作完成后再关闭。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusWaitClose));
         return;
     }
     PersistAsync(true);
@@ -666,7 +745,7 @@ void CMainDlg::PersistAsync(bool close_after) {
 
 void CMainDlg::RunAsync(OperationKind kind, std::function<OperationResult()> work) {
     if (worker_.joinable()) {
-        AppendStatus(L"已有操作正在进行。");
+        AppendStatus(testsign::Tr(testsign::Str::StatusBusy));
         return;
     }
 
@@ -686,10 +765,10 @@ void CMainDlg::RunAsync(OperationKind kind, std::function<OperationResult()> wor
             result->message = ex.wide();
         } catch (const std::exception&) {
             result->success = false;
-            result->message = L"操作失败。";
+            result->message = testsign::Tr(testsign::Str::StatusOpFailed);
         } catch (...) {
             result->success = false;
-            result->message = L"操作失败（未知错误）。";
+            result->message = testsign::Tr(testsign::Str::StatusOpFailedUnknown);
         }
         PostOperationResult(hwnd, std::move(result));
     });

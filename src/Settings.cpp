@@ -108,4 +108,16 @@ void Settings::SaveThemeMode(ThemeMode mode) {
     Save(kThemeModeName, value);
 }
 
+UiLanguage Settings::LoadLanguage() {
+    const std::wstring value = Load(kLanguageName);
+    if (value == L"zh-CN" || value == L"zh") {
+        return UiLanguage::ChineseSimplified;
+    }
+    return UiLanguage::English;
+}
+
+void Settings::SaveLanguage(UiLanguage language) {
+    Save(kLanguageName, language == UiLanguage::ChineseSimplified ? L"zh-CN" : L"en");
+}
+
 }  // namespace testsign

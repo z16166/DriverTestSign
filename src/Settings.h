@@ -5,12 +5,14 @@
 namespace testsign {
 
 enum class ThemeMode { Dark, Light, System };
+enum class UiLanguage { English, ChineseSimplified };
 
 class Settings {
 public:
     static constexpr wchar_t kKeyPathName[] = L"LastKeyPath";
     static constexpr wchar_t kSysPathName[] = L"LastSysPath";
     static constexpr wchar_t kThemeModeName[] = L"ThemeMode";
+    static constexpr wchar_t kLanguageName[] = L"Language";
 
     struct Paths {
         std::wstring key;
@@ -23,6 +25,8 @@ public:
     static void SaveAll(const Paths& paths);
     [[nodiscard]] static ThemeMode LoadThemeMode();
     static void SaveThemeMode(ThemeMode mode);
+    [[nodiscard]] static UiLanguage LoadLanguage();
+    static void SaveLanguage(UiLanguage language);
 };
 
 }  // namespace testsign

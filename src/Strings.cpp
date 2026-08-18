@@ -1,0 +1,178 @@
+#include "pch.h"
+#include "Strings.h"
+
+namespace testsign {
+namespace {
+
+constexpr unsigned kCount = static_cast<unsigned>(Str::Count);
+
+constexpr const wchar_t* kEnglish[] = {
+    L"TestSign  /  Driver Test Signing",
+    L"Key",
+    L"Driver",
+    L"Status",
+    L"PFX path",
+    L"SYS path",
+    L"Theme",
+    L"Language",
+    L"Browse",
+    L"Generate",
+    L"Import to local trusted root",
+    L"Sign",
+    L"Close",
+    L"Dark",
+    L"Light",
+    L"Follow system",
+    L"PFX key files (*.pfx)\0*.pfx\0All files (*.*)\0*.*\0",
+    L"Drivers (*.sys)\0*.sys\0All files (*.*)\0*.*\0",
+    L"Loading previously used paths...",
+    L"Failed: ",
+    L"Ready. Certificate subject: CN=TestSign Kernel Test CA",
+    L"Timestamp server: http://timestamp.digicert.com (falls back to Sectigo)",
+    L"Importing the local root certificate and signing a driver require administrator rights.",
+    L"Generated an empty-password RSA-2048 / SHA256 test certificate (CN=TestSign Kernel Test CA): ",
+    L"Imported the public key into Local Machine Trusted Root Certification Authorities and Trusted Publishers. testsigning must still be enabled to verify test signatures.",
+    L"Signed with SHA256: ",
+    L"Enable test signing before loading this driver (bcdedit /set testsigning on).",
+    L"Selected key: ",
+    L"Generating key: ",
+    L"Select the full path of a PFX key first.",
+    L"Importing the public key into the local machine certificate stores...",
+    L"Selected driver: ",
+    L"Select the full paths of the PFX key and SYS file first.",
+    L"Signing: ",
+    L"Wait for the current operation to finish before closing.",
+    L"Another operation is already running.",
+    L"The operation failed.",
+    L"The operation failed (unknown error).",
+    L":\r\n",
+    L"Unknown error",
+    L"Failed to open the file",
+    L"Failed to get the file size",
+    L"The file is too large or invalid",
+    L"Failed to read the file",
+    L"Select a full path for ",
+    L" first.",
+    L" does not exist:\r\n",
+    L"Failed to create the file",
+    L"Failed to write the file",
+    L"PFX key",
+    L"SYS file",
+    L"Failed to open a software cryptographic provider (smart card UI is disabled)",
+    L"Failed to generate a software RSA key",
+    L"Failed to generate a key container name",
+    L"Failed to encode the certificate subject",
+    L"Failed to encode the certificate extension",
+    L"Failed to import the PFX (empty password)",
+    L"No code-signing certificate with a private key was found in the PFX",
+    L"Failed to open a local machine certificate store (administrator rights required)",
+    L"Failed to write to a local machine certificate store",
+    L"Failed to create the self-signed code-signing certificate",
+    L"Failed to set the certificate friendly name",
+    L"Failed to create an in-memory certificate store",
+    L"Failed to add the certificate to the in-memory store",
+    L"Failed to determine the PFX export size",
+    L"Failed to export the PFX",
+    L"Failed to load mssign32.dll",
+    L"SignerSignEx2 was not found",
+    L"Failed to sign with SHA256 and a timestamp",
+};
+
+constexpr const wchar_t* kChinese[] = {
+    L"TestSign  /  驱动测试签名",
+    L"密钥",
+    L"驱动程序",
+    L"状态",
+    L"PFX 路径",
+    L"SYS 路径",
+    L"主题",
+    L"语言",
+    L"浏览",
+    L"生成",
+    L"导入到本机受信任根证书",
+    L"签名",
+    L"关闭",
+    L"深色",
+    L"浅色",
+    L"跟随系统",
+    L"PFX 密钥文件 (*.pfx)\0*.pfx\0所有文件 (*.*)\0*.*\0",
+    L"驱动程序 (*.sys)\0*.sys\0所有文件 (*.*)\0*.*\0",
+    L"正在读取上次使用的路径...",
+    L"失败：",
+    L"就绪。证书主题：CN=TestSign Kernel Test CA",
+    L"时间戳服务器：http://timestamp.digicert.com （失败时回退 Sectigo）",
+    L"导入本机根证书与签名驱动需要管理员权限。",
+    L"已生成空密码的 RSA-2048 / SHA256 测试证书（CN=TestSign Kernel Test CA）：",
+    L"已将公钥导入本机“受信任的根证书颁发机构”和“受信任的发布者”。验证测试签名仍需开启 testsigning。",
+    L"已使用 SHA256 签名：",
+    L"加载该驱动前请确认本机已开启测试签名（bcdedit /set testsigning on）。",
+    L"已选择密钥：",
+    L"正在生成密钥：",
+    L"请先选择 PFX 密钥 的完整路径。",
+    L"正在导入公钥到本机证书存储...",
+    L"已选择驱动：",
+    L"请先选择 PFX 密钥和 SYS 文件的完整路径。",
+    L"正在签名：",
+    L"请等待当前操作完成后再关闭。",
+    L"已有操作正在进行。",
+    L"操作失败。",
+    L"操作失败（未知错误）。",
+    L"：\r\n",
+    L"未知错误",
+    L"打开文件失败",
+    L"获取文件大小失败",
+    L"文件过大或无效",
+    L"读取文件失败",
+    L"请先选择 ",
+    L" 的完整路径。",
+    L" 不存在：\r\n",
+    L"创建文件失败",
+    L"写入文件失败",
+    L"PFX 密钥",
+    L"SYS 文件",
+    L"打开软件加密服务提供程序失败（已禁止智能卡 UI）",
+    L"生成软件 RSA 密钥失败",
+    L"生成密钥容器名称失败",
+    L"编码证书主题失败",
+    L"编码证书扩展失败",
+    L"导入 PFX 失败（空密码）",
+    L"PFX 中没有找到带私钥的代码签名证书",
+    L"打开本机证书存储失败（需要管理员权限）",
+    L"写入本机证书存储失败",
+    L"创建自签名代码签名证书失败",
+    L"设置证书友好名称失败",
+    L"创建内存证书存储失败",
+    L"将证书加入内存存储失败",
+    L"导出 PFX 大小失败",
+    L"导出 PFX 失败",
+    L"加载 mssign32.dll 失败",
+    L"找不到 SignerSignEx2",
+    L"使用 SHA256 与时间戳签名失败",
+};
+
+static_assert(std::size(kEnglish) == kCount, "English string table size");
+static_assert(std::size(kChinese) == kCount, "Chinese string table size");
+
+UiLanguage g_language = UiLanguage::English;
+
+}  // namespace
+
+void SetUiLanguage(UiLanguage language) {
+    g_language = language;
+}
+
+UiLanguage CurrentUiLanguage() {
+    return g_language;
+}
+
+const wchar_t* Tr(Str id) {
+    const unsigned index = static_cast<unsigned>(id);
+    if (index >= kCount) {
+        return L"";
+    }
+    const wchar_t* const* table =
+        g_language == UiLanguage::ChineseSimplified ? kChinese : kEnglish;
+    return table[index];
+}
+
+}  // namespace testsign

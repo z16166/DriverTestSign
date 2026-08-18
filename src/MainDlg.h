@@ -35,6 +35,7 @@ public:
         MESSAGE_HANDLER(WM_DRAWITEM, OnDrawItem)
         MESSAGE_HANDLER(WM_APP_OPERATION_DONE, OnOperationDone)
         COMMAND_HANDLER(IDC_THEME, CBN_SELCHANGE, OnThemeSelChange)
+        COMMAND_HANDLER(IDC_LANGUAGE, CBN_SELCHANGE, OnLanguageSelChange)
         COMMAND_ID_HANDLER(IDC_BROWSE_KEY, OnBrowseKey)
         COMMAND_ID_HANDLER(IDC_GENERATE, OnGenerate)
         COMMAND_ID_HANDLER(IDC_IMPORT, OnImport)
@@ -56,6 +57,7 @@ public:
     LRESULT OnCtlColorListBox(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnDrawItem(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnThemeSelChange(WORD notify_code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnLanguageSelChange(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnOperationDone(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnBrowseKey(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnGenerate(WORD notify_code, WORD id, HWND control, BOOL& handled);
@@ -80,11 +82,15 @@ private:
     void ApplyControlFonts();
     void ApplyOsChrome();
     void SyncOsTheme();
+    void ApplyUiText();
     void InitThemeCombo();
-    void ApplyThemeComboMetrics();
+    void InitLanguageCombo();
+    void ApplyComboMetrics(int combo_id, int label_id, int item_count);
+    void ApplyAllComboMetrics();
     void CaptureLayout();
     void ApplyScaledLayout(UINT new_dpi);
     [[nodiscard]] testsign::ThemeMode SelectedThemeMode() const;
+    [[nodiscard]] testsign::UiLanguage SelectedLanguage() const;
     void DrawSectionCard(HDC hdc, int group_id, const wchar_t* title);
 
     struct ControlPlacement {
@@ -95,6 +101,7 @@ private:
     std::jthread worker_;
     bool busy_{false};
     bool theme_combo_ready_{false};
+    bool language_combo_ready_{false};
     UINT dpi_{0};
     UINT layout_dpi_{0};
     std::vector<ControlPlacement> layout_;

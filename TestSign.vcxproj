@@ -108,6 +108,7 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="src\Settings.cpp" />
+    <ClCompile Include="src\Strings.cpp" />
     <ClCompile Include="src\Signer.cpp" />
     <ClCompile Include="src\TestSign.cpp" />
     <ClCompile Include="src\WinUtil.cpp" />
@@ -120,6 +121,7 @@
     <ClInclude Include="src\Raii.h" />
     <ClInclude Include="src\resource.h" />
     <ClInclude Include="src\Settings.h" />
+    <ClInclude Include="src\Strings.h" />
     <ClInclude Include="src\Signer.h" />
     <ClInclude Include="src\WinUtil.h" />
   </ItemGroup>

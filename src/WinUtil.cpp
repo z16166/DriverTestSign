@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "WinUtil.h"
 #include "Raii.h"
+#include "Strings.h"
 
 namespace testsign {
 namespace {
@@ -30,7 +31,7 @@ WinException::WinException(std::wstring message, DWORD code)
 }
 
 WinException::WinException(const wchar_t* action, DWORD code)
-    : WinException(std::wstring(action) + L"：\r\n" + FormatWin32Message(code), code) {}
+    : WinException(std::wstring(action) + Tr(Str::ErrorJoin) + FormatWin32Message(code), code) {}
 
 const char* WinException::what() const noexcept {
     return utf8_.c_str();
@@ -53,7 +54,7 @@ std::wstring FormatWin32Message(DWORD code) {
             text.pop_back();
         }
     } else {
-        text += L"未知错误";
+        text += Tr(Str::UnknownError);
     }
     return text;
 }
@@ -69,15 +70,15 @@ std::vector<BYTE> ReadAllBytes(const std::wstring& path) {
     UniqueHandle file(::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) {
-        ThrowLastError(L"打开文件失败");
+        ThrowLastError(Tr(Str::OpenFileFailed));
     }
 
     LARGE_INTEGER size{};
     if (!::GetFileSizeEx(file.get(), &size)) {
-        ThrowLastError(L"获取文件大小失败");
+        ThrowLastError(Tr(Str::GetFileSizeFailed));
     }
     if (size.QuadPart < 0 || size.QuadPart > 64 * 1024 * 1024) {
-        throw WinException(L"文件过大或无效", ERROR_FILE_TOO_LARGE);
+        throw WinException(Tr(Str::FileTooLarge), ERROR_FILE_TOO_LARGE);
     }
 
     std::vector<BYTE> data(static_cast<size_t>(size.QuadPart));
@@ -88,18 +89,18 @@ std::vector<BYTE> ReadAllBytes(const std::wstring& path) {
     DWORD read = 0;
     if (!::ReadFile(file.get(), data.data(), static_cast<DWORD>(data.size()), &read, nullptr) ||
         read != static_cast<DWORD>(data.size())) {
-        ThrowLastError(L"读取文件失败");
+        ThrowLastError(Tr(Str::ReadFileFailed));
     }
     return data;
 }
 
 void EnsureExistingFile(const std::wstring& path, const wchar_t* what) {
     if (path.empty()) {
-        throw WinException(std::wstring(L"请先选择 ") + what + L" 的完整路径。",
+        throw WinException(std::wstring(Tr(Str::SelectPathPrefix)) + what + Tr(Str::SelectPathSuffix),
                            ERROR_INVALID_PARAMETER);
     }
     if (::GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        throw WinException(std::wstring(what) + L" 不存在：\r\n" + path, ERROR_FILE_NOT_FOUND);
+        throw WinException(std::wstring(what) + Tr(Str::DoesNotExist) + path, ERROR_FILE_NOT_FOUND);
     }
 }
 
@@ -107,7 +108,7 @@ void WriteAllBytes(const std::wstring& path, const std::vector<BYTE>& data) {
     UniqueHandle file(::CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                     FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) {
-        ThrowLastError(L"创建文件失败");
+        ThrowLastError(Tr(Str::CreateFileFailed));
     }
 
     if (data.empty()) {
@@ -117,7 +118,7 @@ void WriteAllBytes(const std::wstring& path, const std::vector<BYTE>& data) {
     DWORD written = 0;
     if (!::WriteFile(file.get(), data.data(), static_cast<DWORD>(data.size()), &written, nullptr) ||
         written != static_cast<DWORD>(data.size())) {
-        ThrowLastError(L"写入文件失败");
+        ThrowLastError(Tr(Str::WriteFileFailed));
     }
 }
 

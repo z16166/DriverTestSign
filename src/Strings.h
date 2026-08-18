@@ -1,0 +1,85 @@
+#pragma once
+
+#include "pch.h"
+#include "Settings.h"
+
+namespace testsign {
+
+enum class Str : unsigned {
+    WindowTitle,
+    CardKey,
+    CardDriver,
+    CardStatus,
+    LabelPfx,
+    LabelSys,
+    LabelTheme,
+    LabelLanguage,
+    Browse,
+    Generate,
+    Import,
+    Sign,
+    Close,
+    ThemeDark,
+    ThemeLight,
+    ThemeSystem,
+    FilterPfx,
+    FilterSys,
+    StatusLoading,
+    StatusFailedPrefix,
+    StatusReady1,
+    StatusReady2,
+    StatusReady3,
+    StatusGenerated,
+    StatusImported,
+    StatusSigned,
+    StatusSignHint,
+    StatusSelectedKey,
+    StatusGenerating,
+    StatusNeedPfx,
+    StatusImporting,
+    StatusSelectedSys,
+    StatusNeedPfxAndSys,
+    StatusSigning,
+    StatusWaitClose,
+    StatusBusy,
+    StatusOpFailed,
+    StatusOpFailedUnknown,
+    ErrorJoin,
+    UnknownError,
+    OpenFileFailed,
+    GetFileSizeFailed,
+    FileTooLarge,
+    ReadFileFailed,
+    SelectPathPrefix,
+    SelectPathSuffix,
+    DoesNotExist,
+    CreateFileFailed,
+    WriteFileFailed,
+    WhatPfx,
+    WhatSys,
+    OpenSoftCspFailed,
+    GenerateSoftRsaFailed,
+    GenerateKeyContainerFailed,
+    EncodeSubjectFailed,
+    EncodeExtensionFailed,
+    ImportPfxFailed,
+    NoCodeSigningCert,
+    OpenMachineStoreFailed,
+    WriteMachineStoreFailed,
+    CreateSelfSignedFailed,
+    SetFriendlyNameFailed,
+    CreateMemoryStoreFailed,
+    AddCertToMemoryFailed,
+    ExportPfxSizeFailed,
+    ExportPfxFailed,
+    LoadMssignFailed,
+    SignerSignEx2Missing,
+    SignTimestampFailed,
+    Count
+};
+
+void SetUiLanguage(UiLanguage language);
+[[nodiscard]] UiLanguage CurrentUiLanguage();
+[[nodiscard]] const wchar_t* Tr(Str id);
+
+}  // namespace testsign

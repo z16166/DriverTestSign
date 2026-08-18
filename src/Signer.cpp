@@ -2,6 +2,7 @@
 #include "Signer.h"
 #include "Certificate.h"
 #include "Raii.h"
+#include "Strings.h"
 #include "WinUtil.h"
 
 namespace testsign {
@@ -127,7 +128,7 @@ HRESULT SignWithTimestamp(SignerSignEx2Fn sign, SignerFreeSignerContextFn free_f
 void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
     UniqueModule mssign(::LoadLibraryExW(L"mssign32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32));
     if (!mssign) {
-        ThrowLastError(L"加载 mssign32.dll 失败");
+        ThrowLastError(Tr(Str::LoadMssignFailed));
     }
 
     const auto sign = reinterpret_cast<SignerSignEx2Fn>(
@@ -135,7 +136,7 @@ void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
     const auto free_fn = reinterpret_cast<SignerFreeSignerContextFn>(
         ::GetProcAddress(mssign.get(), "SignerFreeSignerContext"));
     if (sign == nullptr || free_fn == nullptr) {
-        ThrowLastError(L"找不到 SignerSignEx2", ERROR_PROC_NOT_FOUND);
+        ThrowLastError(Tr(Str::SignerSignEx2Missing), ERROR_PROC_NOT_FOUND);
     }
 
     const PfxSession session(pfx_path);
@@ -183,7 +184,7 @@ void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
                                kTimestampUrlFallback);
     }
     if (FAILED(hr)) {
-        ThrowHResult(L"使用 SHA256 与时间戳签名失败", hr);
+        ThrowHResult(Tr(Str::SignTimestampFailed), hr);
     }
 }
 

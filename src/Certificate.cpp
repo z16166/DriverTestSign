@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Certificate.h"
 #include "Raii.h"
+#include "Strings.h"
 #include "WinUtil.h"
 
 namespace testsign {
@@ -36,13 +37,13 @@ public:
             }
         }
         if (!provider_) {
-            ThrowLastError(L"打开软件加密服务提供程序失败（已禁止智能卡 UI）");
+            ThrowLastError(Tr(Str::OpenSoftCspFailed));
         }
 
         HCRYPTKEY raw_key = 0;
         const DWORD flags = (kRsaKeyBits << 16) | CRYPT_EXPORTABLE;
         if (!::CryptGenKey(provider_.get(), AT_SIGNATURE, flags, &raw_key)) {
-            ThrowLastError(L"生成软件 RSA 密钥失败");
+            ThrowLastError(Tr(Str::GenerateSoftRsaFailed));
         }
         key_.reset(raw_key);
     }
@@ -77,7 +78,7 @@ std::wstring MakeContainerName() {
     GUID guid{};
     const HRESULT hr = ::CoCreateGuid(&guid);
     if (FAILED(hr)) {
-        ThrowHResult(L"生成密钥容器名称失败", hr);
+        ThrowHResult(Tr(Str::GenerateKeyContainerFailed), hr);
     }
 
     wchar_t name[80]{};
@@ -91,13 +92,13 @@ std::vector<BYTE> EncodeSubjectName(const wchar_t* subject) {
     DWORD bytes = 0;
     if (!::CertStrToNameW(X509_ASN_ENCODING, subject, CERT_X500_NAME_STR, nullptr, nullptr, &bytes,
                           nullptr)) {
-        ThrowLastError(L"编码证书主题失败");
+        ThrowLastError(Tr(Str::EncodeSubjectFailed));
     }
 
     std::vector<BYTE> name(bytes);
     if (!::CertStrToNameW(X509_ASN_ENCODING, subject, CERT_X500_NAME_STR, nullptr, name.data(),
                           &bytes, nullptr)) {
-        ThrowLastError(L"编码证书主题失败");
+        ThrowLastError(Tr(Str::EncodeSubjectFailed));
     }
     name.resize(bytes);
     return name;
@@ -108,7 +109,7 @@ UniqueLocal<BYTE> EncodeObject(LPCSTR struct_type, const void* struct_info, DWOR
     bytes = 0;
     if (!::CryptEncodeObjectEx(X509_ASN_ENCODING, struct_type, struct_info, CRYPT_ENCODE_ALLOC_FLAG,
                                nullptr, &encoded, &bytes)) {
-        ThrowLastError(L"编码证书扩展失败");
+        ThrowLastError(Tr(Str::EncodeExtensionFailed));
     }
     return UniqueLocal<BYTE>(static_cast<BYTE*>(encoded));
 }
@@ -127,7 +128,7 @@ UniqueCertStore ImportPfxStore(const std::wstring& pfx_path) {
         store.reset(::PFXImportCertStore(&blob, L"", CRYPT_EXPORTABLE | PKCS12_ALWAYS_CNG_KSP));
     }
     if (!store) {
-        ThrowLastError(L"导入 PFX 失败（空密码）");
+        ThrowLastError(Tr(Str::ImportPfxFailed));
     }
     return store;
 }
@@ -143,19 +144,19 @@ UniqueCertContext FindSigningCertificate(HCERTSTORE store) {
             return UniqueCertContext(::CertDuplicateCertificateContext(context.get()));
         }
     }
-    throw WinException(L"PFX 中没有找到带私钥的代码签名证书", ERROR_NOT_FOUND);
+    throw WinException(Tr(Str::NoCodeSigningCert), ERROR_NOT_FOUND);
 }
 
 void AddCertificateToLocalMachineStore(PCCERT_CONTEXT context, const wchar_t* store_name) {
     UniqueCertStore store(::CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
                                           CERT_SYSTEM_STORE_LOCAL_MACHINE, store_name));
     if (!store) {
-        ThrowLastError(L"打开本机证书存储失败（需要管理员权限）");
+        ThrowLastError(Tr(Str::OpenMachineStoreFailed));
     }
 
     if (!::CertAddCertificateContextToStore(store.get(), context, CERT_STORE_ADD_REPLACE_EXISTING,
                                             nullptr)) {
-        ThrowLastError(L"写入本机证书存储失败");
+        ThrowLastError(Tr(Str::WriteMachineStoreFailed));
     }
 }
 
@@ -218,7 +219,7 @@ void GenerateKeyPair(const std::wstring& pfx_path) {
         key_container.provider(), &subject, 0, &key_info, &signature_algorithm, &start, &expire,
         &extension_list));
     if (!cert) {
-        ThrowLastError(L"创建自签名代码签名证书失败");
+        ThrowLastError(Tr(Str::CreateSelfSignedFailed));
     }
 
     std::wstring friendly_name = L"TestSign Kernel Test CA";
@@ -227,31 +228,31 @@ void GenerateKeyPair(const std::wstring& pfx_path) {
     friendly_name_blob.pbData = reinterpret_cast<BYTE*>(friendly_name.data());
     if (!::CertSetCertificateContextProperty(cert.get(), CERT_FRIENDLY_NAME_PROP_ID, 0,
                                              &friendly_name_blob)) {
-        ThrowLastError(L"设置证书友好名称失败");
+        ThrowLastError(Tr(Str::SetFriendlyNameFailed));
     }
 
     UniqueCertStore memory_store(::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr));
     if (!memory_store) {
-        ThrowLastError(L"创建内存证书存储失败");
+        ThrowLastError(Tr(Str::CreateMemoryStoreFailed));
     }
     if (!::CertAddCertificateContextToStore(memory_store.get(), cert.get(), CERT_STORE_ADD_ALWAYS,
                                             nullptr)) {
-        ThrowLastError(L"将证书加入内存存储失败");
+        ThrowLastError(Tr(Str::AddCertToMemoryFailed));
     }
 
     CRYPT_DATA_BLOB pfx{};
     if (!::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, kPfxExportFlags) &&
         ::GetLastError() != ERROR_MORE_DATA) {
-        ThrowLastError(L"导出 PFX 大小失败");
+        ThrowLastError(Tr(Str::ExportPfxSizeFailed));
     }
     if (pfx.cbData == 0) {
-        ThrowLastError(L"导出 PFX 大小失败", ERROR_INVALID_DATA);
+        ThrowLastError(Tr(Str::ExportPfxSizeFailed), ERROR_INVALID_DATA);
     }
 
     std::vector<BYTE> pfx_bytes(pfx.cbData);
     pfx.pbData = pfx_bytes.data();
     if (!::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, kPfxExportFlags)) {
-        ThrowLastError(L"导出 PFX 失败");
+        ThrowLastError(Tr(Str::ExportPfxFailed));
     }
     pfx_bytes.resize(pfx.cbData);
 
