@@ -1,0 +1,65 @@
+#include <windows.h>
+#include "resource.h"
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "TestSign.manifest"
+
+#ifndef APSTUDIO_READONLY_SYMBOLS
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+#pragma code_page(65001)
+#endif
+
+IDD_MAIN DIALOGEX 0, 0, 430, 278
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "TestSign - 驱动测试签名"
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "密钥",IDC_STATIC,7,7,416,68
+    LTEXT           "PFX 路径:",IDC_STATIC,16,22,48,12
+    EDITTEXT        IDC_KEY_PATH,66,20,250,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "浏览...",IDC_BROWSE_KEY,322,19,46,16
+    PUSHBUTTON      "生成...",IDC_GENERATE,372,19,44,16
+    PUSHBUTTON      "导入到本机受信任的根证书颁发机构",IDC_IMPORT,16,44,240,18
+
+    GROUPBOX        "驱动程序",IDC_STATIC,7,82,416,52
+    LTEXT           "SYS 路径:",IDC_STATIC,16,102,48,12
+    EDITTEXT        IDC_SYS_PATH,66,100,250,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "浏览...",IDC_BROWSE_SYS,322,99,46,16
+    PUSHBUTTON      "签名",IDC_SIGN,372,99,44,16
+
+    GROUPBOX        "状态",IDC_STATIC,7,140,416,110
+    EDITTEXT        IDC_STATUS,16,154,398,86,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP
+
+    DEFPUSHBUTTON   "关闭",IDCANCEL,373,256,50,16
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "TestSign 驱动测试签名管理"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "TestSign"
+            VALUE "LegalCopyright", "TestSign"
+            VALUE "OriginalFilename", "TestSign.exe"
+            VALUE "ProductName", "TestSign"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
