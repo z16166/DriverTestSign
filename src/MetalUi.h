@@ -2,34 +2,55 @@
 
 #include "pch.h"
 #include "Raii.h"
+#include "Settings.h"
 
 namespace testsign {
 
-inline constexpr COLORREF kMetalBgTop = RGB(24, 26, 30);
-inline constexpr COLORREF kMetalBgBottom = RGB(14, 15, 18);
-inline constexpr COLORREF kMetalPanelTop = RGB(48, 52, 59);
-inline constexpr COLORREF kMetalPanelBottom = RGB(30, 32, 37);
-inline constexpr COLORREF kMetalLineHi = RGB(92, 98, 108);
-inline constexpr COLORREF kMetalLineLo = RGB(8, 9, 11);
-inline constexpr COLORREF kMetalEdit = RGB(16, 17, 20);
-inline constexpr COLORREF kMetalText = RGB(226, 228, 232);
-inline constexpr COLORREF kMetalMuted = RGB(154, 158, 166);
-inline constexpr COLORREF kMetalGold = RGB(201, 164, 104);
-inline constexpr COLORREF kMetalBtnTop = RGB(68, 73, 82);
-inline constexpr COLORREF kMetalBtnBottom = RGB(36, 39, 45);
-inline constexpr COLORREF kMetalBtnHoverTop = RGB(86, 92, 102);
-inline constexpr COLORREF kMetalDisabled = RGB(108, 112, 118);
+struct MetalPalette {
+    COLORREF bg_top{};
+    COLORREF bg_bottom{};
+    COLORREF panel_top{};
+    COLORREF panel_bottom{};
+    COLORREF line_hi{};
+    COLORREF line_lo{};
+    COLORREF edit{};
+    COLORREF text{};
+    COLORREF muted{};
+    COLORREF gold{};
+    COLORREF btn_top{};
+    COLORREF btn_bottom{};
+    COLORREF btn_hover_top{};
+    COLORREF btn_hover_border{};
+    COLORREF disabled{};
+    COLORREF btn_disabled_top{};
+    COLORREF btn_disabled_bottom{};
+    COLORREF btn_disabled_border{};
+    COLORREF caption_border{};
+    COLORREF grain{};
+    bool dark{true};
+};
+
+[[nodiscard]] bool QueryAppsUseLightTheme();
+[[nodiscard]] bool ResolveUsesLight(ThemeMode mode);
+[[nodiscard]] MetalPalette MakeMetalPalette(bool light);
 
 void FillVerticalGradient(HDC hdc, const RECT& rc, COLORREF top, COLORREF bottom);
-void DrawMetalBackground(HDC hdc, const RECT& rc);
-void DrawMetalCard(HDC hdc, const RECT& rc, const wchar_t* title, HFONT title_font);
-void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool hovered);
-void ApplyDarkFrame(HWND hwnd);
+void DrawMetalBackground(HDC hdc, const RECT& rc, const MetalPalette& palette);
+void DrawMetalCard(HDC hdc, const RECT& rc, const wchar_t* title, HFONT title_font,
+                   const MetalPalette& palette);
+void DrawMetalButton(const DRAWITEMSTRUCT& item, HFONT font, bool primary, bool hovered,
+                     const MetalPalette& palette);
+void DrawMetalComboItem(const DRAWITEMSTRUCT& item, HFONT font, const MetalPalette& palette);
+void ApplyWindowFrame(HWND hwnd, const MetalPalette& palette);
 
 class MetalTheme {
 public:
-    void Create();
+    void Create(ThemeMode preference);
+    bool SetPreference(ThemeMode preference);
+    bool Refresh();
 
+    [[nodiscard]] ThemeMode preference() const noexcept { return preference_; }
+    [[nodiscard]] const MetalPalette& palette() const noexcept { return palette_; }
     [[nodiscard]] HFONT ui_font() const noexcept { return font_ui_.as<HFONT>(); }
     [[nodiscard]] HFONT title_font() const noexcept { return font_title_.as<HFONT>(); }
     [[nodiscard]] HFONT log_font() const noexcept { return font_log_.as<HFONT>(); }
@@ -37,6 +58,11 @@ public:
     [[nodiscard]] HBRUSH edit_brush() const noexcept { return brush_edit_.as<HBRUSH>(); }
 
 private:
+    bool ApplyResolvedPalette(bool force);
+    void RecreateBrushes();
+
+    ThemeMode preference_{ThemeMode::System};
+    MetalPalette palette_{};
     UniqueGdiObject font_ui_;
     UniqueGdiObject font_title_;
     UniqueGdiObject font_log_;

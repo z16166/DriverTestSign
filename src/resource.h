@@ -19,3 +19,5 @@
 #define IDC_GROUP_LOG       1011
 #define IDC_LABEL_KEY       1012
 #define IDC_LABEL_SYS       1013
+#define IDC_LABEL_THEME     1014
+#define IDC_THEME           1015

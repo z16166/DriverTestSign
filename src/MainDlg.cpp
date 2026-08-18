@@ -32,6 +32,39 @@ LRESULT CALLBACK MetalButtonProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
 constexpr int kMetalButtons[] = {IDC_BROWSE_KEY, IDC_GENERATE, IDC_IMPORT,
                                  IDC_BROWSE_SYS, IDC_SIGN,     IDCANCEL};
 
+struct ThemeOption {
+    testsign::ThemeMode mode;
+    const wchar_t* label;
+};
+
+constexpr ThemeOption kThemeOptions[] = {
+    {testsign::ThemeMode::Dark, L"深色"},
+    {testsign::ThemeMode::Light, L"浅色"},
+    {testsign::ThemeMode::System, L"跟随系统"},
+};
+
+[[nodiscard]] int ThemeComboItemHeight(HWND dialog, HFONT font) {
+    RECT dlu{0, 0, 0, 18};
+    if (dialog != nullptr) {
+        ::MapDialogRect(dialog, &dlu);
+    }
+    int height = dlu.bottom > 0 ? dlu.bottom : 24;
+
+    if (font != nullptr) {
+        const HDC hdc = ::GetDC(dialog);
+        const HGDIOBJ previous = ::SelectObject(hdc, font);
+        TEXTMETRICW metrics{};
+        ::GetTextMetricsW(hdc, &metrics);
+        ::SelectObject(hdc, previous);
+        ::ReleaseDC(dialog, hdc);
+        const int from_font = metrics.tmHeight + metrics.tmExternalLeading + 10;
+        if (from_font > height) {
+            height = from_font;
+        }
+    }
+    return height;
+}
+
 }  // namespace
 
 LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
@@ -63,10 +96,30 @@ LRESULT CMainDlg::OnEraseBkgnd(UINT, WPARAM wparam, LPARAM, BOOL&) {
     const HDC hdc = reinterpret_cast<HDC>(wparam);
     RECT client{};
     GetClientRect(&client);
-    testsign::DrawMetalBackground(hdc, client);
+    testsign::DrawMetalBackground(hdc, client, theme_.palette());
     DrawSectionCard(hdc, IDC_GROUP_KEY, L"密钥");
     DrawSectionCard(hdc, IDC_GROUP_DRV, L"驱动程序");
     DrawSectionCard(hdc, IDC_GROUP_LOG, L"状态");
+    return TRUE;
+}
+
+LRESULT CMainDlg::OnSettingChange(UINT, WPARAM, LPARAM, BOOL&) {
+    SyncOsTheme();
+    return 0;
+}
+
+LRESULT CMainDlg::OnThemeChanged(UINT, WPARAM, LPARAM, BOOL&) {
+    SyncOsTheme();
+    return 0;
+}
+
+LRESULT CMainDlg::OnMeasureItem(UINT, WPARAM, LPARAM lparam, BOOL& handled) {
+    auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
+    if (measure == nullptr || measure->CtlID != IDC_THEME) {
+        handled = FALSE;
+        return 0;
+    }
+    measure->itemHeight = ThemeComboItemHeight(m_hWnd, theme_.ui_font());
     return TRUE;
 }
 
@@ -76,30 +129,56 @@ LRESULT CMainDlg::OnCtlColorStatic(UINT, WPARAM wparam, LPARAM lparam, BOOL&) {
     ::GetClassNameW(control, class_name, 16);
     if (::_wcsicmp(class_name, L"Edit") == 0) {
         const HDC hdc = reinterpret_cast<HDC>(wparam);
-        ::SetTextColor(hdc, testsign::kMetalText);
-        ::SetBkColor(hdc, testsign::kMetalEdit);
+        ::SetTextColor(hdc, theme_.palette().text);
+        ::SetBkColor(hdc, theme_.palette().edit);
         return reinterpret_cast<LRESULT>(theme_.edit_brush());
     }
 
     const HDC hdc = reinterpret_cast<HDC>(wparam);
-    ::SetTextColor(hdc, testsign::kMetalMuted);
+    ::SetTextColor(hdc, theme_.palette().muted);
     ::SetBkMode(hdc, TRANSPARENT);
     return reinterpret_cast<LRESULT>(::GetStockObject(NULL_BRUSH));
 }
 
 LRESULT CMainDlg::OnCtlColorEdit(UINT, WPARAM wparam, LPARAM, BOOL&) {
     const HDC hdc = reinterpret_cast<HDC>(wparam);
-    ::SetTextColor(hdc, testsign::kMetalText);
-    ::SetBkColor(hdc, testsign::kMetalEdit);
+    ::SetTextColor(hdc, theme_.palette().text);
+    ::SetBkColor(hdc, theme_.palette().edit);
+    return reinterpret_cast<LRESULT>(theme_.edit_brush());
+}
+
+LRESULT CMainDlg::OnCtlColorListBox(UINT, WPARAM wparam, LPARAM, BOOL&) {
+    const HDC hdc = reinterpret_cast<HDC>(wparam);
+    ::SetTextColor(hdc, theme_.palette().text);
+    ::SetBkColor(hdc, theme_.palette().edit);
     return reinterpret_cast<LRESULT>(theme_.edit_brush());
 }
 
 LRESULT CMainDlg::OnDrawItem(UINT, WPARAM, LPARAM lparam, BOOL&) {
     const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
+    if (item.CtlType == ODT_COMBOBOX || item.CtlID == IDC_THEME) {
+        testsign::DrawMetalComboItem(item, theme_.ui_font(), theme_.palette());
+        return TRUE;
+    }
+
     const int id = ::GetDlgCtrlID(item.hwndItem);
     const bool primary = id == IDC_GENERATE || id == IDC_IMPORT || id == IDC_SIGN;
-    testsign::DrawMetalButton(item, theme_.ui_font(), primary, item.hwndItem == hovered_button_);
+    testsign::DrawMetalButton(item, theme_.ui_font(), primary, item.hwndItem == hovered_button_,
+                             theme_.palette());
     return TRUE;
+}
+
+LRESULT CMainDlg::OnThemeSelChange(WORD, WORD, HWND, BOOL&) {
+    if (!theme_combo_ready_) {
+        return 0;
+    }
+
+    const testsign::ThemeMode mode = SelectedThemeMode();
+    testsign::Settings::SaveThemeMode(mode);
+    if (theme_.SetPreference(mode)) {
+        ApplyOsChrome();
+    }
+    return 0;
 }
 
 LRESULT CMainDlg::OnWmClose(UINT, WPARAM, LPARAM, BOOL&) {
@@ -317,16 +396,91 @@ void CMainDlg::SetBusy(bool busy) {
     }
 }
 
+void CMainDlg::ApplyOsChrome() {
+    testsign::ApplyWindowFrame(m_hWnd, theme_.palette());
+
+    const wchar_t* edit_theme = theme_.palette().dark ? L"DarkMode_Explorer" : L"Explorer";
+    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_STATUS};
+    for (const int id : edits) {
+        const HWND edit = GetDlgItem(id);
+        ::SetWindowTheme(edit, edit_theme, nullptr);
+    }
+
+    const wchar_t* combo_theme = theme_.palette().dark ? L"DarkMode_CFD" : L"CFD";
+    ::SetWindowTheme(GetDlgItem(IDC_THEME), combo_theme, nullptr);
+
+    ::RedrawWindow(m_hWnd, nullptr, nullptr,
+                   RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
+}
+
+void CMainDlg::SyncOsTheme() {
+    if (theme_.preference() != testsign::ThemeMode::System) {
+        return;
+    }
+    if (theme_.Refresh()) {
+        ApplyOsChrome();
+    }
+}
+
+void CMainDlg::InitThemeCombo() {
+    theme_combo_ready_ = false;
+    const HWND combo = GetDlgItem(IDC_THEME);
+    const HWND label = GetDlgItem(IDC_LABEL_THEME);
+    ::SendMessageW(combo, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
+    ::SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+
+    const int item_height = ThemeComboItemHeight(m_hWnd, theme_.ui_font());
+    RECT combo_rc{};
+    ::GetWindowRect(combo, &combo_rc);
+    ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&combo_rc), 2);
+    ::SetWindowPos(combo, nullptr, combo_rc.left, combo_rc.top,
+                   combo_rc.right - combo_rc.left, item_height + 6,
+                   SWP_NOZORDER | SWP_NOACTIVATE);
+    ::SendMessageW(combo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), item_height);
+    ::SendMessageW(combo, CB_SETITEMHEIGHT, 0, item_height);
+
+    RECT label_rc{};
+    ::GetWindowRect(label, &label_rc);
+    ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&label_rc), 2);
+    const int label_height = label_rc.bottom - label_rc.top;
+    ::SetWindowPos(label, nullptr, label_rc.left,
+                   combo_rc.top + (item_height + 6 - label_height) / 2, 0, 0,
+                   SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+    const testsign::ThemeMode selected = theme_.preference();
+    int selected_index = 2;
+    for (const ThemeOption& option : kThemeOptions) {
+        const int index = static_cast<int>(::SendMessageW(combo, CB_ADDSTRING, 0,
+                                                          reinterpret_cast<LPARAM>(option.label)));
+        ::SendMessageW(combo, CB_SETITEMDATA, static_cast<WPARAM>(index),
+                       static_cast<LPARAM>(option.mode));
+        if (option.mode == selected) {
+            selected_index = index;
+        }
+    }
+    ::SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
+    theme_combo_ready_ = true;
+}
+
+testsign::ThemeMode CMainDlg::SelectedThemeMode() const {
+    const HWND combo = GetDlgItem(IDC_THEME);
+    const int index = static_cast<int>(::SendMessageW(combo, CB_GETCURSEL, 0, 0));
+    if (index < 0) {
+        return testsign::ThemeMode::System;
+    }
+    return static_cast<testsign::ThemeMode>(
+        ::SendMessageW(combo, CB_GETITEMDATA, static_cast<WPARAM>(index), 0));
+}
+
 void CMainDlg::ApplyMetalChrome() {
-    theme_.Create();
-    testsign::ApplyDarkFrame(m_hWnd);
+    theme_.Create(testsign::Settings::LoadThemeMode());
 
     const int groups[] = {IDC_GROUP_KEY, IDC_GROUP_DRV, IDC_GROUP_LOG};
     for (const int id : groups) {
         ::ShowWindow(GetDlgItem(id), SW_HIDE);
     }
 
-    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS};
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME};
     for (const int id : labels) {
         const HWND label = GetDlgItem(id);
         ::SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
@@ -344,7 +498,6 @@ void CMainDlg::ApplyMetalChrome() {
                             ::GetWindowLongPtrW(edit, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
         ::SetWindowPos(edit, nullptr, 0, 0, 0, 0,
                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-        ::SetWindowTheme(edit, L"DarkMode_Explorer", nullptr);
     }
 
     button_subclasses_.clear();
@@ -355,13 +508,16 @@ void CMainDlg::ApplyMetalChrome() {
         button_subclasses_.emplace_back(button, MetalButtonProc, subclass_id, reinterpret_cast<DWORD_PTR>(this));
         ++subclass_id;
     }
+
+    InitThemeCombo();
+    ApplyOsChrome();
 }
 
 void CMainDlg::DrawSectionCard(HDC hdc, int group_id, const wchar_t* title) {
     RECT rc{};
     ::GetWindowRect(GetDlgItem(group_id), &rc);
     ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&rc), 2);
-    testsign::DrawMetalCard(hdc, rc, title, theme_.title_font());
+    testsign::DrawMetalCard(hdc, rc, title, theme_.title_font(), theme_.palette());
 }
 
 void CMainDlg::TrackButtonHover(HWND button) {

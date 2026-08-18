@@ -81,4 +81,31 @@ void Settings::SaveAll(const Paths& paths) {
     Save(kSysPathName, paths.sys);
 }
 
+ThemeMode Settings::LoadThemeMode() {
+    const std::wstring value = Load(kThemeModeName);
+    if (value == L"dark") {
+        return ThemeMode::Dark;
+    }
+    if (value == L"light") {
+        return ThemeMode::Light;
+    }
+    return ThemeMode::System;
+}
+
+void Settings::SaveThemeMode(ThemeMode mode) {
+    const wchar_t* value = L"system";
+    switch (mode) {
+    case ThemeMode::Dark:
+        value = L"dark";
+        break;
+    case ThemeMode::Light:
+        value = L"light";
+        break;
+    case ThemeMode::System:
+        value = L"system";
+        break;
+    }
+    Save(kThemeModeName, value);
+}
+
 }  // namespace testsign
