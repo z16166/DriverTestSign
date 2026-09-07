@@ -21,6 +21,15 @@ private:
 
 [[nodiscard]] std::wstring FormatWin32Message(DWORD code);
 [[nodiscard]] std::wstring Trim(std::wstring text);
+[[nodiscard]] std::wstring ParentDirectory(const std::wstring& path);
+[[nodiscard]] std::wstring FileName(const std::wstring& path);
+[[nodiscard]] std::wstring JoinPath(const std::wstring& directory, const std::wstring& name);
+[[nodiscard]] std::wstring CanonicalPath(const std::wstring& path);
+[[nodiscard]] bool SamePath(const std::wstring& left, const std::wstring& right);
+[[nodiscard]] std::wstring ReadTextFile(const std::wstring& path);
+[[nodiscard]] std::wstring FindWindowsKitTool(const wchar_t* name);
+[[nodiscard]] DWORD RunHiddenCommand(const std::wstring& command_line, const std::wstring& cwd,
+                                     std::wstring& output);
 [[nodiscard]] std::vector<BYTE> ReadAllBytes(const std::wstring& path);
 void WriteAllBytes(const std::wstring& path, const std::vector<BYTE>& data);
 void EnsureExistingFile(const std::wstring& path, const wchar_t* what);

@@ -125,7 +125,7 @@ HRESULT SignWithTimestamp(SignerSignEx2Fn sign, SignerFreeSignerContextFn free_f
 
 }  // namespace
 
-void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
+void SignAuthenticodeFile(const std::wstring& pfx_path, const std::wstring& path) {
     UniqueModule mssign(::LoadLibraryExW(L"mssign32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32));
     if (!mssign) {
         ThrowLastError(Tr(Str::LoadMssignFailed));
@@ -143,7 +143,7 @@ void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
 
     SignerFileInfo file_info{};
     file_info.cbSize = sizeof(file_info);
-    file_info.pwszFileName = sys_path.c_str();
+    file_info.pwszFileName = path.c_str();
     file_info.hFile = nullptr;
 
     DWORD index = 0;
@@ -186,6 +186,108 @@ void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
     if (FAILED(hr)) {
         ThrowHResult(Tr(Str::SignTimestampFailed), hr);
     }
+}
+
+std::wstring InfDirective(const std::wstring& text, const wchar_t* key) {
+    std::wstring line;
+    for (wchar_t ch : text) {
+        if (ch == L'\r') {
+            continue;
+        }
+        if (ch != L'\n') {
+            line.push_back(ch);
+            continue;
+        }
+        const std::wstring trimmed = Trim(std::move(line));
+        line.clear();
+        if (trimmed.empty() || trimmed[0] == L';') {
+            continue;
+        }
+        const auto eq = trimmed.find(L'=');
+        if (eq == std::wstring::npos) {
+            continue;
+        }
+        std::wstring name = Trim(trimmed.substr(0, eq));
+        if (::_wcsicmp(name.c_str(), key) != 0) {
+            continue;
+        }
+        std::wstring value = Trim(trimmed.substr(eq + 1));
+        if (value.size() >= 2 && value.front() == L'"' && value.back() == L'"') {
+            value = value.substr(1, value.size() - 2);
+        }
+        return value;
+    }
+    if (!line.empty()) {
+        const std::wstring trimmed = Trim(std::move(line));
+        if (!trimmed.empty() && trimmed[0] != L';') {
+            const auto eq = trimmed.find(L'=');
+            if (eq != std::wstring::npos) {
+                std::wstring name = Trim(trimmed.substr(0, eq));
+                if (::_wcsicmp(name.c_str(), key) == 0) {
+                    std::wstring value = Trim(trimmed.substr(eq + 1));
+                    if (value.size() >= 2 && value.front() == L'"' && value.back() == L'"') {
+                        value = value.substr(1, value.size() - 2);
+                    }
+                    return value;
+                }
+            }
+        }
+    }
+    return {};
+}
+
+std::wstring CatalogPathForInf(const std::wstring& inf_path) {
+    const std::wstring directory = ParentDirectory(inf_path);
+    std::wstring catalog = InfDirective(ReadTextFile(inf_path), L"CatalogFile");
+    if (catalog.empty()) {
+        std::wstring stem = FileName(inf_path);
+        const auto dot = stem.find_last_of(L'.');
+        if (dot != std::wstring::npos) {
+            stem.resize(dot);
+        }
+        catalog = stem + L".cat";
+    }
+    return JoinPath(directory, catalog);
+}
+
+void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path) {
+    SignAuthenticodeFile(pfx_path, sys_path);
+}
+
+std::wstring SignCatalog(const std::wstring& pfx_path, const std::wstring& inf_path,
+                         const std::wstring& sys_path) {
+    const std::wstring inf2cat = FindWindowsKitTool(L"inf2cat.exe");
+    if (inf2cat.empty()) {
+        throw WinException(Tr(Str::Inf2CatMissing), ERROR_FILE_NOT_FOUND);
+    }
+
+    const std::wstring inf_dir = ParentDirectory(inf_path);
+    if (!sys_path.empty()) {
+        SignAuthenticodeFile(pfx_path, sys_path);
+        const std::wstring staged = JoinPath(inf_dir, FileName(sys_path));
+        if (!SamePath(sys_path, staged)) {
+            if (!::CopyFileW(sys_path.c_str(), staged.c_str(), FALSE)) {
+                ThrowLastError(Tr(Str::CopyFileFailed));
+            }
+        }
+    }
+
+    const std::wstring command = L"\"" + inf2cat + L"\" /driver:\"" + inf_dir + L"\" /os:10_X64";
+    std::wstring output;
+    const DWORD exit_code = RunHiddenCommand(command, inf_dir, output);
+    if (exit_code != 0) {
+        std::wstring message = Tr(Str::Inf2CatFailed);
+        message += Tr(Str::ErrorJoin);
+        message += output.empty() ? FormatWin32Message(exit_code) : output;
+        throw WinException(std::move(message), exit_code);
+    }
+
+    const std::wstring catalog = CatalogPathForInf(inf_path);
+    if (::GetFileAttributesW(catalog.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        throw WinException(Tr(Str::CatalogNotCreated), ERROR_FILE_NOT_FOUND);
+    }
+    SignAuthenticodeFile(pfx_path, catalog);
+    return catalog;
 }
 
 }  // namespace testsign

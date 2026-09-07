@@ -9,7 +9,7 @@ public:
     enum { IDD = IDD_MAIN };
     static constexpr UINT WM_APP_OPERATION_DONE = WM_APP + 1;
 
-    enum class OperationKind { LoadSettings, Persist, Generate, Import, Sign };
+    enum class OperationKind { LoadSettings, Persist, Generate, Import, Sign, SignCatalog };
 
     struct OperationResult {
         OperationKind kind{};
@@ -18,6 +18,9 @@ public:
         std::wstring message;
         std::wstring key_path;
         std::wstring sys_path;
+        std::wstring inf_path;
+        std::wstring cat_path;
+        bool copied_sys{false};
     };
 
     BEGIN_MSG_MAP(CMainDlg)
@@ -40,7 +43,9 @@ public:
         COMMAND_ID_HANDLER(IDC_GENERATE, OnGenerate)
         COMMAND_ID_HANDLER(IDC_IMPORT, OnImport)
         COMMAND_ID_HANDLER(IDC_BROWSE_SYS, OnBrowseSys)
+        COMMAND_ID_HANDLER(IDC_BROWSE_INF, OnBrowseInf)
         COMMAND_ID_HANDLER(IDC_SIGN, OnSign)
+        COMMAND_ID_HANDLER(IDC_SIGN_CAT, OnSignCatalog)
         COMMAND_ID_HANDLER(IDCANCEL, OnClose)
     END_MSG_MAP()
 
@@ -63,7 +68,9 @@ public:
     LRESULT OnGenerate(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnImport(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnBrowseSys(WORD notify_code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnBrowseInf(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSign(WORD notify_code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnSignCatalog(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnClose(WORD notify_code, WORD id, HWND control, BOOL& handled);
 
     void TrackButtonHover(HWND button);

@@ -73,12 +73,14 @@ Settings::Paths Settings::LoadAll() {
     Paths paths;
     paths.key = Load(kKeyPathName);
     paths.sys = Load(kSysPathName);
+    paths.inf = Load(kInfPathName);
     return paths;
 }
 
 void Settings::SaveAll(const Paths& paths) {
     Save(kKeyPathName, paths.key);
     Save(kSysPathName, paths.sys);
+    Save(kInfPathName, paths.inf);
 }
 
 ThemeMode Settings::LoadThemeMode() {

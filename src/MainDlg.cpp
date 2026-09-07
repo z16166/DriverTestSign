@@ -30,8 +30,8 @@ LRESULT CALLBACK MetalButtonProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
     return ::DefSubclassProc(hwnd, message, wparam, lparam);
 }
 
-constexpr int kMetalButtons[] = {IDC_BROWSE_KEY, IDC_GENERATE, IDC_IMPORT,
-                                 IDC_BROWSE_SYS, IDC_SIGN,     IDCANCEL};
+constexpr int kMetalButtons[] = {IDC_BROWSE_KEY, IDC_GENERATE, IDC_IMPORT, IDC_BROWSE_SYS,
+                                 IDC_BROWSE_INF, IDC_SIGN,     IDC_SIGN_CAT, IDCANCEL};
 
 struct ThemeOption {
     testsign::ThemeMode mode;
@@ -94,6 +94,7 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
         result.success = true;
         result.key_path = paths.key;
         result.sys_path = paths.sys;
+        result.inf_path = paths.inf;
         return result;
     });
     return TRUE;
@@ -204,7 +205,8 @@ LRESULT CMainDlg::OnDrawItem(UINT, WPARAM, LPARAM lparam, BOOL&) {
     }
 
     const int id = ::GetDlgCtrlID(item.hwndItem);
-    const bool primary = id == IDC_GENERATE || id == IDC_IMPORT || id == IDC_SIGN;
+    const bool primary =
+        id == IDC_GENERATE || id == IDC_IMPORT || id == IDC_SIGN || id == IDC_SIGN_CAT;
     testsign::DrawMetalButton(item, theme_.ui_font(), primary, item.hwndItem == hovered_button_,
                              theme_.palette(), theme_.dpi());
     return TRUE;
@@ -268,9 +270,11 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
     case OperationKind::LoadSettings:
         SetText(IDC_KEY_PATH, result->key_path);
         SetText(IDC_SYS_PATH, result->sys_path);
+        SetText(IDC_INF_PATH, result->inf_path);
         AppendStatus(testsign::Tr(testsign::Str::StatusReady1));
         AppendStatus(testsign::Tr(testsign::Str::StatusReady2));
         AppendStatus(testsign::Tr(testsign::Str::StatusReady3));
+        AppendStatus(testsign::Tr(testsign::Str::StatusReady4));
         break;
     case OperationKind::Persist:
         if (result->close_after) {
@@ -287,6 +291,18 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
     case OperationKind::Sign:
         AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSigned)) + result->sys_path);
         AppendStatus(testsign::Tr(testsign::Str::StatusSignHint));
+        break;
+    case OperationKind::SignCatalog:
+        if (result->copied_sys) {
+            AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusCopiedSys)) +
+                         result->sys_path);
+        }
+        if (!result->sys_path.empty()) {
+            AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSigned)) + result->sys_path);
+        }
+        AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusCatalogSigned)) +
+                     result->cat_path);
+        AppendStatus(testsign::Tr(testsign::Str::StatusCatalogHint));
         break;
     }
     return 0;
@@ -376,6 +392,24 @@ LRESULT CMainDlg::OnBrowseSys(WORD, WORD, HWND, BOOL&) {
     return 0;
 }
 
+LRESULT CMainDlg::OnBrowseInf(WORD, WORD, HWND, BOOL&) {
+    if (busy_) {
+        return 0;
+    }
+
+    SetBusy(true);
+    std::wstring path;
+    if (!ChooseFile(true, L"inf", nullptr, testsign::Tr(testsign::Str::FilterInf), path)) {
+        SetBusy(false);
+        return 0;
+    }
+
+    SetText(IDC_INF_PATH, path);
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSelectedInf)) + path);
+    PersistAsync(false);
+    return 0;
+}
+
 LRESULT CMainDlg::OnSign(WORD, WORD, HWND, BOOL&) {
     if (busy_) {
         return 0;
@@ -383,21 +417,59 @@ LRESULT CMainDlg::OnSign(WORD, WORD, HWND, BOOL&) {
 
     const std::wstring pfx = GetText(IDC_KEY_PATH);
     const std::wstring sys = GetText(IDC_SYS_PATH);
+    const std::wstring inf = GetText(IDC_INF_PATH);
     if (pfx.empty() || sys.empty()) {
         AppendStatus(testsign::Tr(testsign::Str::StatusNeedPfxAndSys));
         return 0;
     }
 
     AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusSigning)) + sys);
-    RunAsync(OperationKind::Sign, [pfx, sys]() {
+    RunAsync(OperationKind::Sign, [pfx, sys, inf]() {
         testsign::EnsureExistingFile(pfx, testsign::Tr(testsign::Str::WhatPfx));
         testsign::EnsureExistingFile(sys, testsign::Tr(testsign::Str::WhatSys));
         testsign::SignDriver(pfx, sys);
-        testsign::Settings::SaveAll({pfx, sys});
+        testsign::Settings::SaveAll({pfx, sys, inf});
         OperationResult result;
         result.success = true;
         result.key_path = pfx;
         result.sys_path = sys;
+        result.inf_path = inf;
+        return result;
+    });
+    return 0;
+}
+
+LRESULT CMainDlg::OnSignCatalog(WORD, WORD, HWND, BOOL&) {
+    if (busy_) {
+        return 0;
+    }
+
+    const std::wstring pfx = GetText(IDC_KEY_PATH);
+    const std::wstring sys = GetText(IDC_SYS_PATH);
+    const std::wstring inf = GetText(IDC_INF_PATH);
+    if (pfx.empty() || inf.empty()) {
+        AppendStatus(testsign::Tr(testsign::Str::StatusNeedPfxAndInf));
+        return 0;
+    }
+
+    AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusCatalogSigning)) + inf);
+    RunAsync(OperationKind::SignCatalog, [pfx, sys, inf]() {
+        testsign::EnsureExistingFile(pfx, testsign::Tr(testsign::Str::WhatPfx));
+        testsign::EnsureExistingFile(inf, testsign::Tr(testsign::Str::WhatInf));
+        if (!sys.empty()) {
+            testsign::EnsureExistingFile(sys, testsign::Tr(testsign::Str::WhatSys));
+        }
+        const std::wstring catalog = testsign::SignCatalog(pfx, inf, sys);
+        testsign::Settings::SaveAll({pfx, sys, inf});
+        OperationResult result;
+        result.success = true;
+        result.key_path = pfx;
+        result.sys_path = sys;
+        result.inf_path = inf;
+        result.cat_path = catalog;
+        result.copied_sys =
+            !sys.empty() && !testsign::SamePath(sys, testsign::JoinPath(testsign::ParentDirectory(inf),
+                                                                       testsign::FileName(sys)));
         return result;
     });
     return 0;
@@ -443,7 +515,8 @@ void CMainDlg::SetBusy(bool busy) {
     const HWND controls[] = {
         GetDlgItem(IDC_KEY_PATH),   GetDlgItem(IDC_BROWSE_KEY), GetDlgItem(IDC_GENERATE),
         GetDlgItem(IDC_IMPORT),     GetDlgItem(IDC_SYS_PATH),  GetDlgItem(IDC_BROWSE_SYS),
-        GetDlgItem(IDC_SIGN),       GetDlgItem(IDCANCEL),
+        GetDlgItem(IDC_INF_PATH),   GetDlgItem(IDC_BROWSE_INF), GetDlgItem(IDC_SIGN),
+        GetDlgItem(IDC_SIGN_CAT),   GetDlgItem(IDCANCEL),
     };
     for (const HWND control : controls) {
         ::EnableWindow(control, busy ? FALSE : TRUE);
@@ -455,7 +528,7 @@ void CMainDlg::ApplyOsChrome() {
     testsign::ApplyWindowFrame(m_hWnd, theme_.palette());
 
     const wchar_t* edit_theme = theme_.palette().dark ? L"DarkMode_Explorer" : L"Explorer";
-    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_STATUS};
+    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_INF_PATH, IDC_STATUS};
     for (const int id : edits) {
         const HWND edit = GetDlgItem(id);
         ::SetWindowTheme(edit, edit_theme, nullptr);
@@ -518,13 +591,16 @@ void CMainDlg::ApplyUiText() {
     SetWindowText(testsign::Tr(testsign::Str::WindowTitle));
     SetDlgItemTextW(IDC_LABEL_KEY, testsign::Tr(testsign::Str::LabelPfx));
     SetDlgItemTextW(IDC_LABEL_SYS, testsign::Tr(testsign::Str::LabelSys));
+    SetDlgItemTextW(IDC_LABEL_INF, testsign::Tr(testsign::Str::LabelInf));
     SetDlgItemTextW(IDC_LABEL_THEME, testsign::Tr(testsign::Str::LabelTheme));
     SetDlgItemTextW(IDC_LABEL_LANG, testsign::Tr(testsign::Str::LabelLanguage));
     SetDlgItemTextW(IDC_BROWSE_KEY, testsign::Tr(testsign::Str::Browse));
     SetDlgItemTextW(IDC_GENERATE, testsign::Tr(testsign::Str::Generate));
     SetDlgItemTextW(IDC_IMPORT, testsign::Tr(testsign::Str::Import));
     SetDlgItemTextW(IDC_BROWSE_SYS, testsign::Tr(testsign::Str::Browse));
+    SetDlgItemTextW(IDC_BROWSE_INF, testsign::Tr(testsign::Str::Browse));
     SetDlgItemTextW(IDC_SIGN, testsign::Tr(testsign::Str::Sign));
+    SetDlgItemTextW(IDC_SIGN_CAT, testsign::Tr(testsign::Str::Catalog));
     SetDlgItemTextW(IDCANCEL, testsign::Tr(testsign::Str::Close));
 }
 
@@ -626,12 +702,13 @@ testsign::UiLanguage CMainDlg::SelectedLanguage() const {
 void CMainDlg::ApplyControlFonts() {
     SetFont(theme_.ui_font());
 
-    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME, IDC_LABEL_LANG};
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_INF, IDC_LABEL_THEME,
+                          IDC_LABEL_LANG};
     for (const int id : labels) {
         ::SendMessageW(GetDlgItem(id), WM_SETFONT, reinterpret_cast<WPARAM>(theme_.ui_font()), TRUE);
     }
 
-    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_STATUS};
+    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_INF_PATH, IDC_STATUS};
     for (const int id : edits) {
         ::SendMessageW(GetDlgItem(id), WM_SETFONT,
                        reinterpret_cast<WPARAM>(id == IDC_STATUS ? theme_.log_font() : theme_.ui_font()),
@@ -656,14 +733,15 @@ void CMainDlg::ApplyMetalChrome() {
         ::ShowWindow(GetDlgItem(id), SW_HIDE);
     }
 
-    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_THEME, IDC_LABEL_LANG};
+    const int labels[] = {IDC_LABEL_KEY, IDC_LABEL_SYS, IDC_LABEL_INF, IDC_LABEL_THEME,
+                          IDC_LABEL_LANG};
     for (const int id : labels) {
         const HWND label = GetDlgItem(id);
         ::SetWindowLongPtrW(label, GWL_EXSTYLE,
                             ::GetWindowLongPtrW(label, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     }
 
-    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_STATUS};
+    const int edits[] = {IDC_KEY_PATH, IDC_SYS_PATH, IDC_INF_PATH, IDC_STATUS};
     for (const int id : edits) {
         const HWND edit = GetDlgItem(id);
         ::SetWindowLongPtrW(edit, GWL_EXSTYLE,
@@ -733,7 +811,8 @@ void CMainDlg::RequestClose() {
 }
 
 void CMainDlg::PersistAsync(bool close_after) {
-    const testsign::Settings::Paths paths{GetText(IDC_KEY_PATH), GetText(IDC_SYS_PATH)};
+    const testsign::Settings::Paths paths{GetText(IDC_KEY_PATH), GetText(IDC_SYS_PATH),
+                                          GetText(IDC_INF_PATH)};
     RunAsync(OperationKind::Persist, [paths, close_after]() {
         testsign::Settings::SaveAll(paths);
         OperationResult result;

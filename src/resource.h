@@ -23,3 +23,7 @@
 #define IDC_THEME           1015
 #define IDC_LABEL_LANG      1016
 #define IDC_LANGUAGE        1017
+#define IDC_INF_PATH        1018
+#define IDC_BROWSE_INF      1019
+#define IDC_SIGN_CAT        1020
+#define IDC_LABEL_INF       1021

@@ -11,12 +11,14 @@ class Settings {
 public:
     static constexpr wchar_t kKeyPathName[] = L"LastKeyPath";
     static constexpr wchar_t kSysPathName[] = L"LastSysPath";
+    static constexpr wchar_t kInfPathName[] = L"LastInfPath";
     static constexpr wchar_t kThemeModeName[] = L"ThemeMode";
     static constexpr wchar_t kLanguageName[] = L"Language";
 
     struct Paths {
         std::wstring key;
         std::wstring sys;
+        std::wstring inf;
     };
 
     [[nodiscard]] static std::wstring Load(std::wstring_view name);
