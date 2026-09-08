@@ -10,6 +10,13 @@
 
 namespace {
 
+void PostStatusLine(HWND hwnd, const wchar_t* line) {
+    auto* text = new std::wstring(line);
+    if (!::PostMessageW(hwnd, CMainDlg::WM_APP_STATUS_LINE, 0, reinterpret_cast<LPARAM>(text))) {
+        delete text;
+    }
+}
+
 void PostOperationResult(HWND hwnd, std::unique_ptr<CMainDlg::OperationResult> result) {
     CMainDlg::OperationResult* raw = result.release();
     if (!::PostMessageW(hwnd, CMainDlg::WM_APP_OPERATION_DONE, 0, reinterpret_cast<LPARAM>(raw))) {
@@ -308,6 +315,14 @@ LRESULT CMainDlg::OnOperationDone(UINT, WPARAM, LPARAM lparam, BOOL&) {
     return 0;
 }
 
+LRESULT CMainDlg::OnStatusLine(UINT, WPARAM, LPARAM lparam, BOOL&) {
+    std::unique_ptr<std::wstring> line(reinterpret_cast<std::wstring*>(lparam));
+    if (line && !line->empty()) {
+        AppendStatus(*line);
+    }
+    return 0;
+}
+
 LRESULT CMainDlg::OnBrowseKey(WORD, WORD, HWND, BOOL&) {
     if (busy_) {
         return 0;
@@ -453,13 +468,16 @@ LRESULT CMainDlg::OnSignCatalog(WORD, WORD, HWND, BOOL&) {
     }
 
     AppendStatus(std::wstring(testsign::Tr(testsign::Str::StatusCatalogSigning)) + inf);
-    RunAsync(OperationKind::SignCatalog, [pfx, sys, inf]() {
+    const HWND hwnd = m_hWnd;
+    RunAsync(OperationKind::SignCatalog, [pfx, sys, inf, hwnd]() {
         testsign::EnsureExistingFile(pfx, testsign::Tr(testsign::Str::WhatPfx));
         testsign::EnsureExistingFile(inf, testsign::Tr(testsign::Str::WhatInf));
         if (!sys.empty()) {
             testsign::EnsureExistingFile(sys, testsign::Tr(testsign::Str::WhatSys));
         }
-        const std::wstring catalog = testsign::SignCatalog(pfx, inf, sys);
+        const std::wstring catalog = testsign::SignCatalog(pfx, inf, sys, [hwnd](const wchar_t* line) {
+            PostStatusLine(hwnd, line);
+        });
         testsign::Settings::SaveAll({pfx, sys, inf});
         OperationResult result;
         result.success = true;

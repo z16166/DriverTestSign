@@ -90,9 +90,12 @@ constexpr const wchar_t* kEnglish[] = {
     L"Failed to sign with SHA256 and a timestamp",
     L"inf2cat.exe was not found. Install the Windows Driver Kit.",
     L"inf2cat failed",
+    L"inf2cat timed out. The INF directory may be too large, or a helper process stalled.",
     L"inf2cat did not produce the catalog file",
     L"Failed to copy the SYS next to the INF",
     L"Failed to start the process",
+    L"The helper process timed out",
+    L"Running inf2cat...",
 };
 
 constexpr const wchar_t* kChinese[] = {
@@ -179,9 +182,12 @@ constexpr const wchar_t* kChinese[] = {
     L"使用 SHA256 与时间戳签名失败",
     L"找不到 inf2cat.exe。请安装 Windows Driver Kit。",
     L"inf2cat 失败",
+    L"inf2cat 超时。INF 所在目录可能过大，或辅助进程卡住了。",
     L"inf2cat 没有生成编录文件",
     L"把 SYS 拷到 INF 同目录失败",
     L"启动进程失败",
+    L"辅助进程超时",
+    L"正在运行 inf2cat...",
 };
 
 static_assert(std::size(kEnglish) == kCount, "English string table size");

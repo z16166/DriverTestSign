@@ -29,7 +29,7 @@ private:
 [[nodiscard]] std::wstring ReadTextFile(const std::wstring& path);
 [[nodiscard]] std::wstring FindWindowsKitTool(const wchar_t* name);
 [[nodiscard]] DWORD RunHiddenCommand(const std::wstring& command_line, const std::wstring& cwd,
-                                     std::wstring& output);
+                                     std::wstring& output, DWORD timeout_ms = 120000);
 [[nodiscard]] std::vector<BYTE> ReadAllBytes(const std::wstring& path);
 void WriteAllBytes(const std::wstring& path, const std::vector<BYTE>& data);
 void EnsureExistingFile(const std::wstring& path, const wchar_t* what);

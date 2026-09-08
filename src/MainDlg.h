@@ -8,6 +8,7 @@ class CMainDlg : public CDialogImpl<CMainDlg> {
 public:
     enum { IDD = IDD_MAIN };
     static constexpr UINT WM_APP_OPERATION_DONE = WM_APP + 1;
+    static constexpr UINT WM_APP_STATUS_LINE = WM_APP + 2;
 
     enum class OperationKind { LoadSettings, Persist, Generate, Import, Sign, SignCatalog };
 
@@ -37,6 +38,7 @@ public:
         MESSAGE_HANDLER(WM_CTLCOLORLISTBOX, OnCtlColorListBox)
         MESSAGE_HANDLER(WM_DRAWITEM, OnDrawItem)
         MESSAGE_HANDLER(WM_APP_OPERATION_DONE, OnOperationDone)
+        MESSAGE_HANDLER(WM_APP_STATUS_LINE, OnStatusLine)
         COMMAND_HANDLER(IDC_THEME, CBN_SELCHANGE, OnThemeSelChange)
         COMMAND_HANDLER(IDC_LANGUAGE, CBN_SELCHANGE, OnLanguageSelChange)
         COMMAND_ID_HANDLER(IDC_BROWSE_KEY, OnBrowseKey)
@@ -64,6 +66,7 @@ public:
     LRESULT OnThemeSelChange(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnLanguageSelChange(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnOperationDone(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+    LRESULT OnStatusLine(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
     LRESULT OnBrowseKey(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnGenerate(WORD notify_code, WORD id, HWND control, BOOL& handled);
     LRESULT OnImport(WORD notify_code, WORD id, HWND control, BOOL& handled);

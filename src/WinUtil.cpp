@@ -180,8 +180,81 @@ std::wstring FindWindowsKitTool(const wchar_t* name) {
     return best;
 }
 
+namespace {
+
+class UniqueProcThreadAttributes {
+public:
+    UniqueProcThreadAttributes() {
+        SIZE_T bytes = 0;
+        ::InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+        if (bytes == 0) {
+            return;
+        }
+        buffer_.resize(bytes);
+        auto* list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer_.data());
+        if (!::InitializeProcThreadAttributeList(list, 1, 0, &bytes)) {
+            buffer_.clear();
+            return;
+        }
+        list_ = list;
+    }
+
+    ~UniqueProcThreadAttributes() {
+        if (list_ != nullptr) {
+            ::DeleteProcThreadAttributeList(list_);
+        }
+    }
+
+    UniqueProcThreadAttributes(const UniqueProcThreadAttributes&) = delete;
+    UniqueProcThreadAttributes& operator=(const UniqueProcThreadAttributes&) = delete;
+
+    [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() const noexcept { return list_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return list_ != nullptr; }
+
+private:
+    std::vector<unsigned char> buffer_;
+    LPPROC_THREAD_ATTRIBUTE_LIST list_{nullptr};
+};
+
+class ThreadJoiner {
+public:
+    explicit ThreadJoiner(std::thread&& thread) : thread_(std::move(thread)) {}
+    ~ThreadJoiner() {
+        if (thread_.joinable()) {
+            thread_.join();
+        }
+    }
+
+    ThreadJoiner(const ThreadJoiner&) = delete;
+    ThreadJoiner& operator=(const ThreadJoiner&) = delete;
+
+private:
+    std::thread thread_;
+};
+
+void AssignKillOnCloseJob(HANDLE job) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    ::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+}
+
+void BytesToOutput(const std::string& bytes, std::wstring& output) {
+    if (bytes.empty()) {
+        return;
+    }
+    const int chars = ::MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()),
+                                            nullptr, 0);
+    if (chars > 0) {
+        output.assign(static_cast<size_t>(chars), L'\0');
+        ::MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), output.data(),
+                              chars);
+    }
+}
+
+}  // namespace
+
 DWORD RunHiddenCommand(const std::wstring& command_line, const std::wstring& cwd,
-                       std::wstring& output) {
+                       std::wstring& output, DWORD timeout_ms) {
     SECURITY_ATTRIBUTES security{};
     security.nLength = sizeof(security);
     security.bInheritHandle = TRUE;
@@ -196,43 +269,96 @@ DWORD RunHiddenCommand(const std::wstring& command_line, const std::wstring& cwd
         ThrowLastError(Tr(Str::CreateProcessFailed));
     }
 
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_HIDE;
-    startup.hStdOutput = writer.get();
-    startup.hStdError = writer.get();
-    startup.hStdInput = ::GetStdHandle(STD_INPUT_HANDLE);
+    UniqueHandle nul(::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   &security, OPEN_EXISTING, 0, nullptr));
+    if (!nul) {
+        ThrowLastError(Tr(Str::CreateProcessFailed));
+    }
+
+    UniqueHandle job(::CreateJobObjectW(nullptr, nullptr));
+    if (job) {
+        AssignKillOnCloseJob(job.get());
+    }
+
+    UniqueProcThreadAttributes attributes;
+    HANDLE inherit_handles[2] = {nul.get(), writer.get()};
+    const bool use_attribute_list =
+        attributes &&
+        ::UpdateProcThreadAttribute(attributes.get(), 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                    inherit_handles, sizeof(inherit_handles), nullptr, nullptr);
+
+    STARTUPINFOEXW startup_ex{};
+    startup_ex.StartupInfo.cb = use_attribute_list ? sizeof(startup_ex) : sizeof(STARTUPINFOW);
+    startup_ex.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup_ex.StartupInfo.wShowWindow = SW_HIDE;
+    startup_ex.StartupInfo.hStdInput = nul.get();
+    startup_ex.StartupInfo.hStdOutput = writer.get();
+    startup_ex.StartupInfo.hStdError = writer.get();
+    if (use_attribute_list) {
+        startup_ex.lpAttributeList = attributes.get();
+    }
 
     std::wstring mutable_command = command_line;
     PROCESS_INFORMATION info{};
-    if (!::CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-                          nullptr, cwd.empty() ? nullptr : cwd.c_str(), &startup, &info)) {
+    DWORD creation_flags = CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+    if (use_attribute_list) {
+        creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
+    }
+    if (!::CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, TRUE, creation_flags,
+                          nullptr, cwd.empty() ? nullptr : cwd.c_str(), &startup_ex.StartupInfo,
+                          &info)) {
         ThrowLastError(Tr(Str::CreateProcessFailed));
     }
     UniqueHandle process(info.hProcess);
     UniqueHandle thread(info.hThread);
     writer.reset();
+    nul.reset();
+
+    bool in_job = false;
+    if (job) {
+        in_job = ::AssignProcessToJobObject(job.get(), process.get()) != FALSE;
+    }
+    if (::ResumeThread(thread.get()) == static_cast<DWORD>(-1)) {
+        const DWORD error = ::GetLastError();
+        ::TerminateProcess(process.get(), error);
+        ThrowLastError(Tr(Str::CreateProcessFailed), error);
+    }
 
     std::string bytes;
-    char buffer[4096]{};
-    DWORD read = 0;
-    while (::ReadFile(reader.get(), buffer, sizeof(buffer), &read, nullptr) && read > 0) {
-        bytes.append(buffer, read);
+    const HANDLE read_handle = reader.get();
+    const DWORD wait = [&]() -> DWORD {
+        ThreadJoiner reader_thread(std::thread([read_handle, &bytes]() {
+            char buffer[4096]{};
+            DWORD read = 0;
+            while (::ReadFile(read_handle, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+                bytes.append(buffer, read);
+            }
+        }));
+
+        const DWORD result = ::WaitForSingleObject(process.get(), timeout_ms);
+        if (result == WAIT_TIMEOUT) {
+            if (in_job) {
+                ::TerminateJobObject(job.get(), ERROR_TIMEOUT);
+            } else {
+                ::TerminateProcess(process.get(), ERROR_TIMEOUT);
+            }
+            ::WaitForSingleObject(process.get(), 5000);
+        } else if (in_job) {
+            DWORD exit_code = 0;
+            ::GetExitCodeProcess(process.get(), &exit_code);
+            ::TerminateJobObject(job.get(), exit_code);
+        }
+        reader.reset();
+        return result;
+    }();
+
+    BytesToOutput(bytes, output);
+    if (wait == WAIT_TIMEOUT) {
+        throw WinException(Tr(Str::ProcessTimedOut), ERROR_TIMEOUT);
     }
-    ::WaitForSingleObject(process.get(), INFINITE);
+
     DWORD exit_code = 0;
     ::GetExitCodeProcess(process.get(), &exit_code);
-
-    if (!bytes.empty()) {
-        const int chars = ::MultiByteToWideChar(CP_ACP, 0, bytes.data(),
-                                                static_cast<int>(bytes.size()), nullptr, 0);
-        if (chars > 0) {
-            output.assign(static_cast<size_t>(chars), L'\0');
-            ::MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()),
-                                  output.data(), chars);
-        }
-    }
     return exit_code;
 }
 

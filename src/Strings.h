@@ -89,9 +89,12 @@ enum class Str : unsigned {
     SignTimestampFailed,
     Inf2CatMissing,
     Inf2CatFailed,
+    Inf2CatTimeout,
     CatalogNotCreated,
     CopyFileFailed,
     CreateProcessFailed,
+    ProcessTimedOut,
+    StatusCatalogRunInf2Cat,
     Count
 };
 

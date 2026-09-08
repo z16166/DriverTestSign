@@ -9,6 +9,7 @@ inline constexpr wchar_t kTimestampUrlFallback[] = L"http://timestamp.sectigo.co
 
 void SignDriver(const std::wstring& pfx_path, const std::wstring& sys_path);
 std::wstring SignCatalog(const std::wstring& pfx_path, const std::wstring& inf_path,
-                         const std::wstring& sys_path);
+                         const std::wstring& sys_path,
+                         const std::function<void(const wchar_t*)>& progress = {});
 
 }  // namespace testsign
