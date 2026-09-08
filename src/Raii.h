@@ -90,6 +90,48 @@ private:
     HANDLE handle_{INVALID_HANDLE_VALUE};
 };
 
+class UniqueFindHandle {
+public:
+    UniqueFindHandle() = default;
+    explicit UniqueFindHandle(HANDLE handle) noexcept : handle_(handle) {}
+    ~UniqueFindHandle() { reset(); }
+
+    UniqueFindHandle(const UniqueFindHandle&) = delete;
+    UniqueFindHandle& operator=(const UniqueFindHandle&) = delete;
+
+    UniqueFindHandle(UniqueFindHandle&& other) noexcept : handle_(other.release()) {}
+    UniqueFindHandle& operator=(UniqueFindHandle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            handle_ = other.release();
+        }
+        return *this;
+    }
+
+    void reset(HANDLE handle = INVALID_HANDLE_VALUE) noexcept {
+        if (is_valid(handle_)) {
+            ::FindClose(handle_);
+        }
+        handle_ = handle;
+    }
+
+    [[nodiscard]] HANDLE release() noexcept {
+        HANDLE handle = handle_;
+        handle_ = INVALID_HANDLE_VALUE;
+        return handle;
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return is_valid(handle_); }
+
+private:
+    [[nodiscard]] static bool is_valid(HANDLE handle) noexcept {
+        return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+    }
+
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
+
 class UniqueModule {
 public:
     UniqueModule() = default;

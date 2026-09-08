@@ -156,8 +156,8 @@ std::wstring FindWindowsKitTool(const wchar_t* name) {
         const std::wstring bin = std::wstring(root) + L"\\Windows Kits\\10\\bin";
         const std::wstring glob = bin + L"\\*";
         WIN32_FIND_DATAW data{};
-        const HANDLE find = ::FindFirstFileW(glob.c_str(), &data);
-        if (find == INVALID_HANDLE_VALUE) {
+        UniqueFindHandle find(::FindFirstFileW(glob.c_str(), &data));
+        if (!find) {
             continue;
         }
         do {
@@ -175,8 +175,7 @@ std::wstring FindWindowsKitTool(const wchar_t* name) {
                     best = candidate;
                 }
             }
-        } while (::FindNextFileW(find, &data));
-        ::FindClose(find);
+        } while (::FindNextFileW(find.get(), &data));
     }
     return best;
 }
