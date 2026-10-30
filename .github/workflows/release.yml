@@ -1,0 +1,148 @@
+name: Release
+
+# windows-latest is still the Visual Studio 2022 image. This project uses
+# PlatformToolset v145, which is only on the Visual Studio 2026 runner.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install WTL 10.0.10320
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = "10.0.10320"
+          $expected = "28670ADB25C05772A4B5D7C598C98B1567587B377D689A792845B026768F4D3A"
+          $nupkg = Join-Path $env:RUNNER_TEMP "wtl.$version.nupkg"
+          $url = "https://api.nuget.org/v3-flatcontainer/wtl/$version/wtl.$version.nupkg"
+          curl.exe -fsSL -L -o $nupkg $url
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download WTL $version" }
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $nupkg).Hash
+          if ($hash -ne $expected) { throw "WTL package hash mismatch: $hash" }
+
+          $extract = Join-Path $env:RUNNER_TEMP "wtl"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $extract)
+          $include = Join-Path $extract "lib\native\include"
+          if (-not (Test-Path (Join-Path $include "atlapp.h"))) { throw "WTL headers were not in the package" }
+
+          $dest = "C:\work\WTL\Include"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item -Path (Join-Path $include "*") -Destination $dest -Force
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -products * -version "[18.0,19.0)" -requires Microsoft.Component.MSBuild -find "MSBuild\Current\Bin\amd64\MSBuild.exe" | Select-Object -First 1
+          if (-not $msbuild) { throw "Visual Studio 2026 MSBuild was not found" }
+          $props = Join-Path $env:GITHUB_WORKSPACE ".github\static-crt.props"
+          & $msbuild (Join-Path $env:GITHUB_WORKSPACE "TestSign.sln") /nologo /m /v:m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v145 /p:ForceImportAfterCppTargets="$props"
+          if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
+
+      - name: Verify static MSVC CRT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -version "[18.0,19.0)" -find "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Sort-Object {
+              if ($_ -match "MSVC\\([0-9]+\.[0-9]+\.[0-9]+)\\") { [version]$Matches[1] } else { [version]"0.0" }
+            } |
+            Select-Object -Last 1
+          if (-not $dumpbin) { throw "dumpbin was not found" }
+          $exe = Join-Path $env:GITHUB_WORKSPACE "x64\Release\TestSign.exe"
+          if (-not (Test-Path $exe)) { throw "TestSign.exe was not produced" }
+          $deps = & $dumpbin /dependents $exe
+          $deps | Write-Output
+          $dynamicCrt = $deps | Select-String -Pattern "vcruntime|msvcp[0-9]|ucrtbase|concrt[0-9]|api-ms-win-crt-"
+          if ($dynamicCrt) {
+            throw "TestSign.exe is linked to the dynamic MSVC CRT:`n$($dynamicCrt.Line -join "`n")"
+          }
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $zip = Join-Path $dist "TestSign-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $env:GITHUB_WORKSPACE "x64\Release\TestSign.exe") -DestinationPath $zip
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestSign-x64
+          path: dist/TestSign-x64.zip
+
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\TestSign-x64.zip"
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          $isTag = $env:GITHUB_REF.StartsWith("refs/tags/")
+          if ($isTag) {
+            $tag = $env:GITHUB_REF.Substring("refs/tags/".Length)
+            $title = "TestSign $tag"
+            $notes = @"
+Windows x64 build of TestSign $tag.
+
+TestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.
+"@
+          } else {
+            $tag = "latest"
+            $title = "Latest"
+            $notes = @"
+Windows x64 build from commit $sha.
+
+TestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.
+"@
+          }
+          [System.IO.File]::WriteAllText($notesFile, $notes.Replace("`r`n", "`n"))
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 1>$null 2>$null
+          $exists = $LASTEXITCODE -eq 0
+          if ($exists -and $isTag) {
+            gh release upload $tag $zip --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Failed to upload the release asset" }
+          } else {
+            if ($exists) {
+              gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+              if ($LASTEXITCODE -ne 0) { throw "Failed to replace the existing release" }
+            }
+            $createArgs = @(
+              "release", "create", $tag, $zip,
+              "--repo", $env:GITHUB_REPOSITORY,
+              "--title", $title,
+              "--notes-file", $notesFile
+            )
+            if (-not $isTag) { $createArgs += @("--target", $env:GITHUB_SHA) }
+            & gh @createArgs
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create the GitHub release" }
+          }
