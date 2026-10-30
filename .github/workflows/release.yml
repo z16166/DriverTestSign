@@ -110,19 +110,11 @@ jobs:
           if ($isTag) {
             $tag = $env:GITHUB_REF.Substring("refs/tags/".Length)
             $title = "TestSign $tag"
-            $notes = @"
-Windows x64 build of TestSign $tag.
-
-TestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.
-"@
+            $notes = "Windows x64 build of TestSign $tag.`n`nTestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.`n"
           } else {
             $tag = "latest"
             $title = "Latest"
-            $notes = @"
-Windows x64 build from commit $sha.
-
-TestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.
-"@
+            $notes = "Windows x64 build from commit $sha.`n`nTestSign.exe is linked with the static MSVC CRT (/MT). Run it as Administrator.`n"
           }
           [System.IO.File]::WriteAllText($notesFile, $notes.Replace("`r`n", "`n"))
 
