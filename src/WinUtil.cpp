@@ -3,6 +3,8 @@
 #include "Raii.h"
 #include "Strings.h"
 
+#include <process.h>
+
 namespace testsign {
 namespace {
 
@@ -216,12 +218,28 @@ private:
     LPPROC_THREAD_ATTRIBUTE_LIST list_{nullptr};
 };
 
+struct PipeReadArgs {
+    HANDLE read_handle{};
+    std::string* bytes{};
+};
+
+unsigned __stdcall ReadPipeMain(void* param) {
+    auto* args = static_cast<PipeReadArgs*>(param);
+    char buffer[4096]{};
+    DWORD read = 0;
+    while (::ReadFile(args->read_handle, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+        args->bytes->append(buffer, read);
+    }
+    return 0;
+}
+
 class ThreadJoiner {
 public:
-    explicit ThreadJoiner(std::thread&& thread) : thread_(std::move(thread)) {}
+    explicit ThreadJoiner(HANDLE thread) : thread_(thread) {}
     ~ThreadJoiner() {
-        if (thread_.joinable()) {
-            thread_.join();
+        if (thread_ != nullptr) {
+            ::WaitForSingleObject(thread_, INFINITE);
+            ::CloseHandle(thread_);
         }
     }
 
@@ -229,7 +247,7 @@ public:
     ThreadJoiner& operator=(const ThreadJoiner&) = delete;
 
 private:
-    std::thread thread_;
+    HANDLE thread_;
 };
 
 void AssignKillOnCloseJob(HANDLE job) {
@@ -327,13 +345,12 @@ DWORD RunHiddenCommand(const std::wstring& command_line, const std::wstring& cwd
     std::string bytes;
     const HANDLE read_handle = reader.get();
     const DWORD wait = [&]() -> DWORD {
-        ThreadJoiner reader_thread(std::thread([read_handle, &bytes]() {
-            char buffer[4096]{};
-            DWORD read = 0;
-            while (::ReadFile(read_handle, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
-                bytes.append(buffer, read);
-            }
-        }));
+        PipeReadArgs pipe_reader{read_handle, &bytes};
+        const uintptr_t thread = _beginthreadex(nullptr, 0, ReadPipeMain, &pipe_reader, 0, nullptr);
+        if (thread == 0) {
+            ThrowLastError(Tr(Str::CreateProcessFailed));
+        }
+        ThreadJoiner reader_thread(reinterpret_cast<HANDLE>(thread));
 
         const DWORD result = ::WaitForSingleObject(process.get(), timeout_ms);
         if (result == WAIT_TIMEOUT) {

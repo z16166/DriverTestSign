@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "MainDlg.h"
+
+#include <process.h>
 #include "Certificate.h"
 #include "Settings.h"
 #include "Signer.h"
@@ -840,6 +842,34 @@ void CMainDlg::PersistAsync(bool close_after) {
     });
 }
 
+struct WorkerArgs {
+    HWND hwnd{};
+    CMainDlg::OperationKind kind{};
+    std::function<CMainDlg::OperationResult()> work;
+};
+
+unsigned __stdcall WorkerMain(void* param) {
+    const std::unique_ptr<WorkerArgs> args(static_cast<WorkerArgs*>(param));
+    testsign::ComInitializer com;
+    auto result = std::make_unique<CMainDlg::OperationResult>();
+    result->kind = args->kind;
+    try {
+        *result = args->work();
+        result->kind = args->kind;
+    } catch (const testsign::WinException& ex) {
+        result->success = false;
+        result->message = ex.wide();
+    } catch (const std::exception&) {
+        result->success = false;
+        result->message = testsign::Tr(testsign::Str::StatusOpFailed);
+    } catch (...) {
+        result->success = false;
+        result->message = testsign::Tr(testsign::Str::StatusOpFailedUnknown);
+    }
+    PostOperationResult(args->hwnd, std::move(result));
+    return 0;
+}
+
 void CMainDlg::RunAsync(OperationKind kind, std::function<OperationResult()> work) {
     if (worker_.joinable()) {
         AppendStatus(testsign::Tr(testsign::Str::StatusBusy));
@@ -849,26 +879,13 @@ void CMainDlg::RunAsync(OperationKind kind, std::function<OperationResult()> wor
     if (!busy_) {
         SetBusy(true);
     }
-    const HWND hwnd = m_hWnd;
-    worker_ = std::jthread([hwnd, kind, work = std::move(work)]() {
-        testsign::ComInitializer com;
-        auto result = std::make_unique<OperationResult>();
-        result->kind = kind;
-        try {
-            *result = work();
-            result->kind = kind;
-        } catch (const testsign::WinException& ex) {
-            result->success = false;
-            result->message = ex.wide();
-        } catch (const std::exception&) {
-            result->success = false;
-            result->message = testsign::Tr(testsign::Str::StatusOpFailed);
-        } catch (...) {
-            result->success = false;
-            result->message = testsign::Tr(testsign::Str::StatusOpFailedUnknown);
-        }
-        PostOperationResult(hwnd, std::move(result));
-    });
+    auto* args = new WorkerArgs{m_hWnd, kind, std::move(work)};
+    const uintptr_t thread = _beginthreadex(nullptr, 0, WorkerMain, args, 0, nullptr);
+    if (thread == 0) {
+        delete args;
+        testsign::ThrowLastError(testsign::Tr(testsign::Str::StatusOpFailed));
+    }
+    worker_.reset(reinterpret_cast<HANDLE>(thread));
 }
 
 bool CMainDlg::ChooseFile(bool open_dialog, const wchar_t* default_ext, const wchar_t* default_name,

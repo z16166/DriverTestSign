@@ -47,14 +47,36 @@ HFONT MakeFont(const wchar_t* family, int point_size, int weight, UINT dpi) {
 }  // namespace
 
 UINT QueryWindowDpi(HWND hwnd) {
-    if (hwnd != nullptr) {
-        const UINT dpi = ::GetDpiForWindow(hwnd);
-        if (dpi != 0) {
-            return dpi;
+    // GetDpiForWindow / GetDpiForSystem arrived in Windows 10 1607. Resolve them
+    // at runtime so the process still loads on Windows 7.
+    const HMODULE user32 = ::GetModuleHandleW(L"user32.dll");
+    if (user32 != nullptr) {
+        using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+        using GetDpiForSystemFn = UINT(WINAPI*)();
+        const auto get_dpi_for_window = reinterpret_cast<GetDpiForWindowFn>(
+            ::GetProcAddress(user32, "GetDpiForWindow"));
+        if (hwnd != nullptr && get_dpi_for_window != nullptr) {
+            const UINT dpi = get_dpi_for_window(hwnd);
+            if (dpi != 0) {
+                return dpi;
+            }
+        }
+        const auto get_dpi_for_system =
+            reinterpret_cast<GetDpiForSystemFn>(::GetProcAddress(user32, "GetDpiForSystem"));
+        if (get_dpi_for_system != nullptr) {
+            const UINT dpi = get_dpi_for_system();
+            if (dpi != 0) {
+                return dpi;
+            }
         }
     }
-    const UINT system_dpi = ::GetDpiForSystem();
-    return system_dpi != 0 ? system_dpi : 96;
+
+    const HDC screen = ::GetDC(nullptr);
+    const int dpi = screen != nullptr ? ::GetDeviceCaps(screen, LOGPIXELSX) : 96;
+    if (screen != nullptr) {
+        ::ReleaseDC(nullptr, screen);
+    }
+    return dpi > 0 ? static_cast<UINT>(dpi) : 96;
 }
 
 int ScalePx(int px96, UINT dpi) {

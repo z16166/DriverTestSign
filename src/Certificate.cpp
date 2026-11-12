@@ -8,10 +8,17 @@ namespace testsign {
 namespace {
 
 constexpr DWORD kRsaKeyBits = 2048;
-constexpr DWORD kPfxExportFlags =
+// PKCS12_EXPORT_SILENT, PKCS12_NO_PERSIST_KEY and PKCS12_ALWAYS_CNG_KSP are
+// rejected by crypt32 on Windows 7. Try them first, then the Vista/7 subset.
+constexpr DWORD kPfxExportFlagsModern =
     EXPORT_PRIVATE_KEYS | PKCS12_INCLUDE_EXTENDED_PROPERTIES | PKCS12_EXPORT_SILENT;
-constexpr DWORD kPfxImportFlags =
+constexpr DWORD kPfxExportFlagsWin7 = EXPORT_PRIVATE_KEYS | PKCS12_INCLUDE_EXTENDED_PROPERTIES;
+constexpr DWORD kPfxExportFlagSets[] = {kPfxExportFlagsModern, kPfxExportFlagsWin7, EXPORT_PRIVATE_KEYS};
+
+constexpr DWORD kPfxImportFlagsModern =
     CRYPT_EXPORTABLE | PKCS12_NO_PERSIST_KEY | PKCS12_ALWAYS_CNG_KSP | PKCS12_IMPORT_SILENT;
+constexpr DWORD kPfxImportFlagsWin7 = CRYPT_EXPORTABLE | PKCS12_IMPORT_SILENT;
+constexpr DWORD kPfxImportFlagSets[] = {kPfxImportFlagsModern, kPfxImportFlagsWin7, CRYPT_EXPORTABLE};
 
 struct SoftwareCsp {
     const wchar_t* name;
@@ -120,17 +127,17 @@ UniqueCertStore ImportPfxStore(const std::wstring& pfx_path) {
     blob.cbData = static_cast<DWORD>(bytes.size());
     blob.pbData = bytes.data();
 
-    UniqueCertStore store(::PFXImportCertStore(&blob, L"", kPfxImportFlags));
-    if (!store) {
-        store.reset(::PFXImportCertStore(&blob, nullptr, kPfxImportFlags));
+    const wchar_t* const passwords[] = {L"", nullptr};
+    UniqueCertStore store;
+    for (const DWORD flags : kPfxImportFlagSets) {
+        for (const wchar_t* password : passwords) {
+            store.reset(::PFXImportCertStore(&blob, password, flags));
+            if (store) {
+                return store;
+            }
+        }
     }
-    if (!store) {
-        store.reset(::PFXImportCertStore(&blob, L"", CRYPT_EXPORTABLE | PKCS12_ALWAYS_CNG_KSP));
-    }
-    if (!store) {
-        ThrowLastError(Tr(Str::ImportPfxFailed));
-    }
-    return store;
+    ThrowLastError(Tr(Str::ImportPfxFailed));
 }
 
 UniqueCertContext FindSigningCertificate(HCERTSTORE store) {
@@ -241,17 +248,23 @@ void GenerateKeyPair(const std::wstring& pfx_path) {
     }
 
     CRYPT_DATA_BLOB pfx{};
-    if (!::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, kPfxExportFlags) &&
-        ::GetLastError() != ERROR_MORE_DATA) {
-        ThrowLastError(Tr(Str::ExportPfxSizeFailed));
+    DWORD export_flags = 0;
+    for (const DWORD flags : kPfxExportFlagSets) {
+        pfx = {};
+        if (::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, flags) ||
+            ::GetLastError() == ERROR_MORE_DATA) {
+            export_flags = flags;
+            break;
+        }
     }
-    if (pfx.cbData == 0) {
-        ThrowLastError(Tr(Str::ExportPfxSizeFailed), ERROR_INVALID_DATA);
+    if (export_flags == 0 || pfx.cbData == 0) {
+        ThrowLastError(Tr(Str::ExportPfxSizeFailed),
+                       export_flags == 0 ? ::GetLastError() : ERROR_INVALID_DATA);
     }
 
     std::vector<BYTE> pfx_bytes(pfx.cbData);
     pfx.pbData = pfx_bytes.data();
-    if (!::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, kPfxExportFlags)) {
+    if (!::PFXExportCertStoreEx(memory_store.get(), &pfx, L"", nullptr, export_flags)) {
         ThrowLastError(Tr(Str::ExportPfxFailed));
     }
     pfx_bytes.resize(pfx.cbData);

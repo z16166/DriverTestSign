@@ -5,7 +5,37 @@
 namespace testsign {
 namespace {
 
-std::mutex g_settings_mutex;
+class SettingsLock {
+public:
+    SettingsLock() { ::InitializeCriticalSection(&section_); }
+    ~SettingsLock() { ::DeleteCriticalSection(&section_); }
+
+    SettingsLock(const SettingsLock&) = delete;
+    SettingsLock& operator=(const SettingsLock&) = delete;
+
+    void Enter() { ::EnterCriticalSection(&section_); }
+    void Leave() { ::LeaveCriticalSection(&section_); }
+
+private:
+    CRITICAL_SECTION section_{};
+};
+
+class SettingsLockGuard {
+public:
+    explicit SettingsLockGuard(SettingsLock& lock) : lock_(lock) { lock_.Enter(); }
+    ~SettingsLockGuard() { lock_.Leave(); }
+
+    SettingsLockGuard(const SettingsLockGuard&) = delete;
+    SettingsLockGuard& operator=(const SettingsLockGuard&) = delete;
+
+private:
+    SettingsLock& lock_;
+};
+
+SettingsLock& SettingsMutex() {
+    static SettingsLock lock;
+    return lock;
+}
 
 constexpr wchar_t kSettingsSubKey[] = L"Software\\TestSign";
 
@@ -25,7 +55,7 @@ UniqueRegistryKey OpenSettingsKey(bool create) {
 }  // namespace
 
 std::wstring Settings::Load(std::wstring_view name) {
-    const std::lock_guard<std::mutex> lock(g_settings_mutex);
+    const SettingsLockGuard lock(SettingsMutex());
     const UniqueRegistryKey key = OpenSettingsKey(false);
     if (!key) {
         return {};
@@ -57,7 +87,7 @@ std::wstring Settings::Load(std::wstring_view name) {
 }
 
 void Settings::Save(std::wstring_view name, const std::wstring& value) {
-    const std::lock_guard<std::mutex> lock(g_settings_mutex);
+    const SettingsLockGuard lock(SettingsMutex());
     UniqueRegistryKey key = OpenSettingsKey(true);
     if (!key) {
         return;

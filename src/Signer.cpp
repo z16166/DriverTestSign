@@ -5,7 +5,6 @@
 #include "Strings.h"
 #include "WinUtil.h"
 
-#include <filesystem>
 #include <wininet.h>
 
 namespace testsign {
@@ -94,6 +93,12 @@ struct SignerContext {
 using SignerSignEx2Fn = HRESULT(WINAPI*)(DWORD, SignerSubjectInfo*, SignerCert*, SignerSignatureInfo*,
                                          void*, DWORD, PCSTR, PCWSTR, PCRYPT_ATTRIBUTES, void*,
                                          SignerContext**, void*, void*);
+using SignerSignExFn = HRESULT(WINAPI*)(DWORD, SignerSubjectInfo*, SignerCert*, SignerSignatureInfo*,
+                                        void*, LPCWSTR, PCRYPT_ATTRIBUTES, void*, SignerContext**);
+// SignerTimeStampEx2 is in mssign32 on Windows 7. The docs call the fourth argument
+// ALG_ID; the export reads a PCSTR OID. Passing CALG_SHA_256 faults.
+using SignerTimeStampEx2Fn = HRESULT(WINAPI*)(DWORD, SignerSubjectInfo*, LPCWSTR, PCSTR,
+                                              PCRYPT_ATTRIBUTES, void*, SignerContext**);
 using SignerFreeSignerContextFn = HRESULT(WINAPI*)(SignerContext*);
 
 class UniqueSignerContext {
@@ -136,6 +141,25 @@ HRESULT SignWithoutTimestamp(SignerSignEx2Fn sign, SignerFreeSignerContextFn fre
     return hr;
 }
 
+HRESULT SignWithSignerSignEx(SignerSignExFn sign, SignerFreeSignerContextFn free_fn,
+                             SignerSubjectInfo* subject, SignerCert* cert,
+                             SignerSignatureInfo* signature, const wchar_t* timestamp_url) {
+    SignerContext* raw_context = nullptr;
+    const HRESULT hr =
+        sign(0, subject, cert, signature, nullptr, timestamp_url, nullptr, nullptr, &raw_context);
+    UniqueSignerContext context(raw_context, free_fn);
+    return hr;
+}
+
+HRESULT TimeStampRfc3161(SignerTimeStampEx2Fn stamp, SignerFreeSignerContextFn free_fn,
+                         SignerSubjectInfo* subject, const wchar_t* timestamp_url) {
+    SignerContext* raw_context = nullptr;
+    const HRESULT hr = stamp(kSignerTimestampRfc3161, subject, timestamp_url, szOID_NIST_sha256,
+                             nullptr, nullptr, &raw_context);
+    UniqueSignerContext context(raw_context, free_fn);
+    return hr;
+}
+
 void ApplyWinInetTimeouts(DWORD timeout_ms) {
     ::InternetSetOptionW(nullptr, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     ::InternetSetOptionW(nullptr, INTERNET_OPTION_SEND_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
@@ -158,6 +182,26 @@ bool ContainsIgnoreCase(const std::wstring& haystack, const std::wstring& needle
                        }) != haystack.end();
 }
 
+void DeleteTree(const std::wstring& path) {
+    WIN32_FIND_DATAW data{};
+    const UniqueFindHandle find(::FindFirstFileW(JoinPath(path, L"*").c_str(), &data));
+    if (find) {
+        do {
+            if (::_wcsicmp(data.cFileName, L".") == 0 || ::_wcsicmp(data.cFileName, L"..") == 0) {
+                continue;
+            }
+            const std::wstring child = JoinPath(path, data.cFileName);
+            if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                DeleteTree(child);
+            } else {
+                ::SetFileAttributesW(child.c_str(), FILE_ATTRIBUTE_NORMAL);
+                ::DeleteFileW(child.c_str());
+            }
+        } while (::FindNextFileW(find.get(), &data));
+    }
+    ::RemoveDirectoryW(path.c_str());
+}
+
 class UniqueTempDirectory {
 public:
     UniqueTempDirectory() {
@@ -176,17 +220,12 @@ public:
         wchar_t name[40]{};
         swprintf_s(name, L"TestSignCat-%08lX", static_cast<unsigned long>(guid.Data1));
         path_ = JoinPath(root, name);
-        std::error_code error;
-        std::filesystem::create_directories(path_, error);
-        if (error) {
-            throw WinException(Tr(Str::CreateFileFailed), ERROR_CANNOT_MAKE);
+        if (!::CreateDirectoryW(path_.c_str(), nullptr)) {
+            ThrowLastError(Tr(Str::CreateFileFailed));
         }
     }
 
-    ~UniqueTempDirectory() {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
+    ~UniqueTempDirectory() { DeleteTree(path_); }
 
     UniqueTempDirectory(const UniqueTempDirectory&) = delete;
     UniqueTempDirectory& operator=(const UniqueTempDirectory&) = delete;
@@ -242,19 +281,36 @@ void CopyReferencedPackageFiles(const std::wstring& inf_path, const std::wstring
     } while (::FindNextFileW(find.get(), &data));
 }
 
+HMODULE LoadSystemLibrary(const wchar_t* file_name) {
+    // LOAD_LIBRARY_SEARCH_SYSTEM32 needs KB2533623 and is absent on a stock
+    // Windows 7 SP1 install. A System32 path does not search other directories.
+    wchar_t directory[MAX_PATH]{};
+    const UINT length = ::GetSystemDirectoryW(directory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return nullptr;
+    }
+    const std::wstring path = std::wstring(directory) + L'\\' + file_name;
+    return ::LoadLibraryW(path.c_str());
+}
+
 }  // namespace
 
 void SignAuthenticodeFile(const std::wstring& pfx_path, const std::wstring& path) {
-    UniqueModule mssign(::LoadLibraryExW(L"mssign32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32));
+    UniqueModule mssign(LoadSystemLibrary(L"mssign32.dll"));
     if (!mssign) {
         ThrowLastError(Tr(Str::LoadMssignFailed));
     }
 
-    const auto sign = reinterpret_cast<SignerSignEx2Fn>(
+    // SignerSignEx2 is Windows 8+. Windows 7 has SignerSignEx and SignerTimeStampEx2.
+    const auto sign_ex2 = reinterpret_cast<SignerSignEx2Fn>(
         ::GetProcAddress(mssign.get(), "SignerSignEx2"));
+    const auto sign_ex = reinterpret_cast<SignerSignExFn>(
+        ::GetProcAddress(mssign.get(), "SignerSignEx"));
+    const auto timestamp_ex2 = reinterpret_cast<SignerTimeStampEx2Fn>(
+        ::GetProcAddress(mssign.get(), "SignerTimeStampEx2"));
     const auto free_fn = reinterpret_cast<SignerFreeSignerContextFn>(
         ::GetProcAddress(mssign.get(), "SignerFreeSignerContext"));
-    if (sign == nullptr || free_fn == nullptr) {
+    if (free_fn == nullptr || (sign_ex2 == nullptr && sign_ex == nullptr)) {
         ThrowLastError(Tr(Str::SignerSignEx2Missing), ERROR_PROC_NOT_FOUND);
     }
 
@@ -299,16 +355,39 @@ void SignAuthenticodeFile(const std::wstring& pfx_path, const std::wstring& path
 
     ApplyWinInetTimeouts(15000);
 
-    HRESULT hr = SignWithTimestamp(sign, free_fn, &subject, &signer_cert, &signature, kTimestampUrl);
-    if (FAILED(hr)) {
-        hr = SignWithTimestamp(sign, free_fn, &subject, &signer_cert, &signature,
-                               kTimestampUrlFallback);
+    if (sign_ex2 != nullptr) {
+        HRESULT hr = SignWithTimestamp(sign_ex2, free_fn, &subject, &signer_cert, &signature,
+                                       kTimestampUrl);
+        if (FAILED(hr)) {
+            hr = SignWithTimestamp(sign_ex2, free_fn, &subject, &signer_cert, &signature,
+                                   kTimestampUrlFallback);
+        }
+        if (FAILED(hr)) {
+            hr = SignWithoutTimestamp(sign_ex2, free_fn, &subject, &signer_cert, &signature);
+        }
+        if (FAILED(hr)) {
+            ThrowHResult(Tr(Str::SignTimestampFailed), hr);
+        }
+        return;
     }
-    if (FAILED(hr)) {
-        hr = SignWithoutTimestamp(sign, free_fn, &subject, &signer_cert, &signature);
-    }
+
+    HRESULT hr = SignWithSignerSignEx(sign_ex, free_fn, &subject, &signer_cert, &signature, nullptr);
     if (FAILED(hr)) {
         ThrowHResult(Tr(Str::SignTimestampFailed), hr);
+    }
+    if (timestamp_ex2 == nullptr) {
+        return;
+    }
+
+    HRESULT stamp_hr = TimeStampRfc3161(timestamp_ex2, free_fn, &subject, kTimestampUrl);
+    if (FAILED(stamp_hr)) {
+        stamp_hr = TimeStampRfc3161(timestamp_ex2, free_fn, &subject, kTimestampUrlFallback);
+    }
+    if (FAILED(stamp_hr)) {
+        hr = SignWithSignerSignEx(sign_ex, free_fn, &subject, &signer_cert, &signature, nullptr);
+        if (FAILED(hr)) {
+            ThrowHResult(Tr(Str::SignTimestampFailed), hr);
+        }
     }
 }
 
@@ -407,7 +486,9 @@ std::wstring SignCatalog(const std::wstring& pfx_path, const std::wstring& inf_p
 
     ReportProgress(progress, Str::StatusCatalogRunInf2Cat);
     const std::wstring command =
-        L"\"" + inf2cat + L"\" /driver:\"" + package.path() + L"\" /os:10_X64 /verbose";
+        L"\"" + inf2cat +
+        L"\" /driver:\"" + package.path() +
+        L"\" /os:7_X64,Server2008R2_X64,8_X64,Server8_X64,6_3_X64,Server6_3_X64,10_X64 /verbose";
     std::wstring output;
     DWORD exit_code = 0;
     try {

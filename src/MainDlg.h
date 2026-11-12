@@ -108,7 +108,34 @@ private:
         RECT rc{};
     };
 
-    std::jthread worker_;
+    class WorkerThread {
+    public:
+        WorkerThread() = default;
+        ~WorkerThread() { join(); }
+
+        WorkerThread(const WorkerThread&) = delete;
+        WorkerThread& operator=(const WorkerThread&) = delete;
+
+        void reset(HANDLE thread) {
+            join();
+            thread_ = thread;
+        }
+
+        void join() {
+            if (thread_ != nullptr) {
+                ::WaitForSingleObject(thread_, INFINITE);
+                ::CloseHandle(thread_);
+                thread_ = nullptr;
+            }
+        }
+
+        [[nodiscard]] bool joinable() const noexcept { return thread_ != nullptr; }
+
+    private:
+        HANDLE thread_{nullptr};
+    };
+
+    WorkerThread worker_;
     bool busy_{false};
     bool theme_combo_ready_{false};
     bool language_combo_ready_{false};
